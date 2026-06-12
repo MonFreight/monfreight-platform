@@ -1,0 +1,1660 @@
+/**
+ * Mon Freight Logistics Management System — Frontend
+ * v2.0 — Professional freight forwarding SPA
+ */
+
+"use strict";
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+let shipments = [...(window.SHIPMENTS || [])];
+
+// Filter state from server (set by Jinja2 template)
+const _filterStart = window.FILTER_START || "";
+const _filterEnd   = window.FILTER_END   || "";
+
+// Default sort matches server-side: batch_date desc, box_number asc secondary.
+// User can override by clicking column headers.
+let sortKey = "batch_date";
+let sortDir = "desc";
+
+const selectedIds = new Set();
+
+// ============================================================
+// SECTION / PANEL NAVIGATION
+// ============================================================
+
+function switchPanel(name) {
+  // Deactivate all panels
+  $$(".panel").forEach(p => p.classList.remove("active"));
+  $$(".topnav a").forEach(a => a.classList.remove("active"));
+
+  const panel = $(`#panel-${name}`);
+  if (panel) panel.classList.add("active");
+
+  const link = $(`.topnav a[data-panel="${name}"]`);
+  if (link) link.classList.add("active");
+
+  // Lazy-load panel data
+  if (name === "dashboard") loadDashboard();
+  if (name === "customers") loadCustomers();
+  if (name === "reports")   loadReports();
+  if (name === "settings")  loadSettings();
+
+  // Sync the labels panel selection state
+  if (name === "labels") syncLabelsPanel();
+
+  sessionStorage.setItem("mf_panel", name);
+}
+
+// Wire up nav links
+$$(".topnav a[data-panel]").forEach(a => {
+  a.addEventListener("click", e => {
+    e.preventDefault();
+    switchPanel(a.dataset.panel);
+  });
+});
+
+// Restore last panel on page load (default: dashboard)
+const _savedPanel = sessionStorage.getItem("mf_panel") || "dashboard";
+switchPanel(_savedPanel);
+
+// Quick-action dashboard buttons
+$("#importBtn2")?.addEventListener("click", () => {
+  openImportModal();
+});
+
+// Dashboard refresh button
+$("#dashRefreshBtn")?.addEventListener("click", loadDashboard);
+
+// ============================================================
+// FORMULA EVALUATOR (client-side preview)
+// ============================================================
+
+const FORMULA_RE = /^[\s\d.+\-*/()weightvaluvw]+$/i;
+
+function evalFormula(s, weight = 0, value = 0) {
+  if (s === null || s === undefined) return null;
+  let str = String(s).trim();
+  if (!str) return 0;
+  if (str.startsWith("=")) str = str.slice(1);
+  if (!isNaN(Number(str))) return Number(str);
+  if (!FORMULA_RE.test(str)) throw new Error("Bad characters in formula");
+  const expr = str
+    .replace(/\bweight\b/g, `(${+weight || 0})`)
+    .replace(/\bvalue\b/g, `(${+value || 0})`)
+    .replace(/\bw\b/g, `(${+weight || 0})`)
+    .replace(/\bv\b/g, `(${+value || 0})`);
+  if (!/^[\d.+\-*/()\s]+$/.test(expr)) throw new Error("Unsafe expression");
+  const v = Function(`"use strict"; return (${expr});`)(); // eslint-disable-line no-new-func
+  if (!Number.isFinite(v)) throw new Error("Bad result");
+  return v;
+}
+
+// ============================================================
+// TOAST / CONFIRM
+// ============================================================
+
+function toast(msg, kind = "ok") {
+  const t = document.createElement("div");
+  t.className = `toast ${kind}`;
+  t.textContent = String(msg);
+  $("#toast").appendChild(t);
+  const delay = kind === "err" ? 5500 : 2400;
+  setTimeout(() => { t.style.opacity = 0; t.style.transition = "opacity .4s"; }, delay);
+  setTimeout(() => t.remove(), delay + 500);
+}
+
+function formatServerError(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (Array.isArray(err.detail)) {
+    return err.detail.map(e => {
+      const field = (e.loc || []).slice(1).join(".") || "(field)";
+      return `${field}: ${e.msg}`;
+    }).join(" · ");
+  }
+  if (err.detail) return String(err.detail);
+  return JSON.stringify(err);
+}
+
+async function safeJson(res) {
+  try { return await res.json(); } catch { return null; }
+}
+
+function customConfirm({ title = "Confirm", message = "Are you sure?",
+                         okLabel = "Delete", okClass = "danger" } = {}) {
+  return new Promise(resolve => {
+    const m = $("#confirmModal");
+    $("#confirmTitle").textContent = title;
+    $("#confirmMessage").textContent = message;
+    const ok = $("#confirmOk");
+    ok.textContent = okLabel;
+    ok.className = `btn ${okClass}`;
+    m.classList.remove("hidden");
+    function cleanup(v) {
+      m.classList.add("hidden");
+      ok.removeEventListener("click", onOk);
+      $("#confirmCancel").removeEventListener("click", onCancel);
+      resolve(v);
+    }
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    ok.addEventListener("click", onOk);
+    $("#confirmCancel").addEventListener("click", onCancel);
+  });
+}
+
+// ============================================================
+// PRINT / LABEL CHOOSER
+// ============================================================
+
+function printXlsxInBrowser(url) {
+  const htmlUrl = url.replace(/(\?|$)/, ".html$1");
+  const win = window.open(htmlUrl, "_blank");
+  if (!win) toast("Browser blocked the print window — please allow pop-ups for this site.", "err");
+}
+
+function chooseLabelTemplate(scopeText = "this label") {
+  return new Promise(resolve => {
+    const m = $("#printChooserModal");
+    if (!m) { resolve("html"); return; }
+    $("#printChooserScope").textContent = scopeText;
+    m.classList.remove("hidden");
+
+    const buttons = $$(".chooser-btn", m);
+    const close   = $("#printChooserClose");
+    const cancel  = $("#printChooserCancel");
+
+    function cleanup(choice) {
+      m.classList.add("hidden");
+      buttons.forEach(b => b.removeEventListener("click", onPick));
+      close.removeEventListener("click", onCancel);
+      cancel.removeEventListener("click", onCancel);
+      m.removeEventListener("click", onBackdrop);
+      resolve(choice);
+    }
+    const onPick = e => cleanup(e.currentTarget.dataset.choice);
+    const onCancel = () => cleanup(null);
+    const onBackdrop = e => { if (e.target === m) cleanup(null); };
+
+    buttons.forEach(b => b.addEventListener("click", onPick));
+    close.addEventListener("click", onCancel);
+    cancel.addEventListener("click", onCancel);
+    m.addEventListener("click", onBackdrop);
+  });
+}
+
+// ============================================================
+// FORMAT HELPERS
+// ============================================================
+
+const fmt0  = n => Number(n || 0).toLocaleString("en-AU", { maximumFractionDigits: 0 });
+const fmt2  = n => Number(n || 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtMoney = n => "$" + fmt2(n);
+
+// ============================================================
+// STATS BAR
+// ============================================================
+
+function recomputeStats(rows) {
+  const boxes  = rows.length;
+  const weight = rows.reduce((a, r) => a + Number(r.weight || 0), 0);
+  const value  = rows.reduce((a, r) => a + Number(r.declared_value || 0), 0);
+  const total  = rows.reduce((a, r) => a + Number(r.total_aud || 0), 0);
+  const paid   = rows.filter(r => r.paid).reduce((a, r) => a + Number(r.total_aud || 0), 0);
+  $("#statBoxes").textContent  = fmt0(boxes);
+  $("#statWeight").textContent = fmt2(weight);
+  $("#statValue").textContent  = fmtMoney(value);
+  $("#statPrice").textContent  = fmtMoney(total);
+  $("#statPaid").textContent   = fmtMoney(paid);
+  $("#statUnpaid").textContent = fmtMoney(total - paid);
+  $("#rowCount").textContent   = `${boxes} shipment${boxes === 1 ? "" : "s"}`;
+}
+
+// ============================================================
+// SORT
+// ============================================================
+
+function compare(a, b, key) {
+  const av = a[key]; const bv = b[key];
+  if (key === "paid") return (av === bv) ? 0 : (av ? 1 : -1);
+  // Always use numeric comparison for box_number (prevents "10" sorting before "2")
+  if (key === "box_number") return (Number(av) || 0) - (Number(bv) || 0);
+  if (typeof av === "number" || typeof bv === "number")
+    return (Number(av) || 0) - (Number(bv) || 0);
+  return String(av || "").localeCompare(String(bv || ""));
+}
+function sortRows(rows) {
+  return [...rows].sort((a, b) => {
+    // Primary sort (user-selected key + direction)
+    let r = compare(a, b, sortKey);
+    if (sortDir === "desc") r = -r;
+    if (r !== 0) return r;
+    // Secondary: always box_number ascending (natural numeric order within batch)
+    if (sortKey !== "box_number") {
+      const boxCmp = (Number(a.box_number) || 0) - (Number(b.box_number) || 0);
+      if (boxCmp !== 0) return boxCmp;
+    }
+    // Tertiary: batch_date descending (most recent batch first)
+    if (sortKey !== "batch_date") {
+      return -String(a.batch_date || "").localeCompare(String(b.batch_date || ""));
+    }
+    return 0;
+  });
+}
+function updateSortIndicators() {
+  $$("th.sortable").forEach(th => {
+    th.classList.remove("asc", "desc");
+    if (th.dataset.sort === sortKey) th.classList.add(sortDir);
+  });
+}
+
+// ============================================================
+// RENDER SHIPMENTS TABLE
+// ============================================================
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+const escapeAttr = escapeHtml;
+
+function renderTable() {
+  const tbody = $("#shipTable tbody");
+  tbody.innerHTML = "";
+  const rows = sortRows(shipments);
+  if (rows.length === 0) $("#emptyMsg").classList.remove("hidden");
+  else                   $("#emptyMsg").classList.add("hidden");
+
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    tr.dataset.id = r.id;
+    if (r.paid)            tr.classList.add("paid");
+    if (selectedIds.has(r.id)) tr.classList.add("selected");
+    tr.innerHTML = `
+      <td class="cb-col"><input type="checkbox" class="row-cb" ${selectedIds.has(r.id) ? "checked" : ""}></td>
+      <td><span class="ed" data-field="batch_date" data-type="date">${r.batch_date}</span></td>
+      <td>BOX ${r.box_number}</td>
+      <td class="mf-num">${r.mf_number}</td>
+      <td><strong>${escapeHtml(r.sender_name)}</strong>
+          <div class="muted small">${escapeHtml(r.sender_phone || "")}</div></td>
+      <td><strong>${escapeHtml(r.receiver_name)}</strong>
+          <div class="muted small">${escapeHtml(r.receiver_city || "")}${r.receiver_city && r.receiver_phone ? " · " : ""}${escapeHtml(r.receiver_phone || "")}</div></td>
+      <td>${escapeHtml(r.description || "")}</td>
+      <td class="num">${fmt2(r.declared_value)}</td>
+      <td class="num">${fmt2(r.weight)}</td>
+      <td class="num">
+        <span class="ed" data-field="price" data-type="formula">${fmt2(r.price_aud)}</span>
+        ${r.price_formula ? `<span class="formula" title="${escapeAttr(r.price_formula)}">${escapeHtml(r.price_formula)}</span>` : ""}
+      </td>
+      <td class="num"><span class="ed" data-field="extra">${fmt2(r.extra_charges)}</span></td>
+      <td class="num"><strong>${fmt2(r.total_aud)}</strong></td>
+      <td><span class="paid-pill ${r.paid ? "yes" : "no"}" data-field="paid">${r.paid ? "✓ Paid" : "Unpaid"}</span></td>
+      <td class="rowbtns">
+        <button class="btn small" data-act="print" title="Print / view label">🖨</button>
+        <a class="btn small" href="/shipments/${r.id}/label.xlsx" title="Download label as Excel">📥</a>
+        <button class="btn small" data-act="edit" title="Edit shipment">✏</button>
+        <button class="btn small danger" data-act="delete" title="Delete shipment">✕</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  recomputeStats(rows);
+  updateSortIndicators();
+  updateSelectionUI();
+}
+
+// ============================================================
+// SELECTION & BULK ACTIONS
+// ============================================================
+
+function updateSelectionUI() {
+  const n = selectedIds.size;
+
+  // Shipments panel buttons
+  ["printSelectedBtn","deleteSelectedBtn","excelSelectedBtn"].forEach(id => {
+    const b = $(`#${id}`);
+    if (!b) return;
+    b.disabled = n === 0;
+    const label = id === "printSelectedBtn" ? "Print Selected" :
+                  id === "excelSelectedBtn" ? "Excel Selected" : "Delete Selected";
+    b.textContent = `${label} (${n})`;
+  });
+
+  // Labels panel buttons
+  const lpsb = $("#labelPrintSelectedBtn");
+  const lesb = $("#labelExcelSelectedBtn");
+  if (lpsb) lpsb.disabled = n === 0;
+  if (lesb) lesb.disabled = n === 0;
+
+  const selInfo = $("#labelSelectionInfo");
+  if (selInfo) {
+    selInfo.textContent = n === 0
+      ? "No shipments selected. Go to the Shipments tab to select some."
+      : `${n} shipment${n === 1 ? "" : "s"} selected.`;
+    selInfo.className = n > 0 ? "small" : "muted small";
+  }
+
+  const sa = $("#selectAll");
+  if (!sa) return;
+  const visibleCbs = $$(".row-cb", $("#shipTable tbody"));
+  const visibleIds = visibleCbs.map(cb => +cb.closest("tr").dataset.id);
+  const allSel  = visibleCbs.length > 0 && visibleIds.every(i => selectedIds.has(i));
+  const someSel = visibleIds.some(i => selectedIds.has(i));
+  sa.checked = allSel;
+  sa.indeterminate = !allSel && someSel;
+}
+
+function syncLabelsPanel() { updateSelectionUI(); }
+
+document.addEventListener("change", e => {
+  if (e.target.matches(".row-cb")) {
+    const tr = e.target.closest("tr");
+    const id = +tr.dataset.id;
+    if (e.target.checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+    tr.classList.toggle("selected", e.target.checked);
+    updateSelectionUI();
+  } else if (e.target.id === "selectAll") {
+    const cbs = $$(".row-cb", $("#shipTable tbody"));
+    cbs.forEach(cb => {
+      const id = +cb.closest("tr").dataset.id;
+      cb.checked = e.target.checked;
+      cb.closest("tr").classList.toggle("selected", e.target.checked);
+      if (e.target.checked) selectedIds.add(id);
+      else selectedIds.delete(id);
+    });
+    updateSelectionUI();
+  }
+});
+
+// Print selected (from shipments panel)
+$("#printSelectedBtn")?.addEventListener("click", async () => {
+  if (selectedIds.size === 0) return;
+  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const n = orderedIds.length;
+  const choice = await chooseLabelTemplate(`${n} selected label${n === 1 ? "" : "s"}`);
+  if (!choice) return;
+  if (choice === "html") window.open(`/labels/by-ids?ids=${orderedIds.join(",")}`, "_blank");
+  else printXlsxInBrowser(`/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`);
+});
+
+// Excel selected (from shipments panel)
+$("#excelSelectedBtn")?.addEventListener("click", () => {
+  if (selectedIds.size === 0) return;
+  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  window.location = `/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`;
+});
+
+// Delete selected (from shipments panel)
+$("#deleteSelectedBtn")?.addEventListener("click", async () => {
+  if (selectedIds.size === 0) return;
+  const ids = Array.from(selectedIds);
+  const ok = await customConfirm({
+    title: "Delete Selected Shipments",
+    message: `Permanently delete ${ids.length} selected shipment${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
+    okLabel: "Delete Selected",
+  });
+  if (!ok) return;
+  const res = await fetch("/api/shipments/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const err = await safeJson(res);
+    toast("Delete failed — " + formatServerError(err), "err");
+    return;
+  }
+  shipments = shipments.filter(r => !selectedIds.has(r.id));
+  selectedIds.clear();
+  renderTable();
+  toast("Selected shipments deleted.");
+});
+
+// Labels panel buttons (mirror to shipments-panel actions)
+$("#labelPrintSelectedBtn")?.addEventListener("click", async () => {
+  if (selectedIds.size === 0) { toast("No shipments selected — go to Shipments and select some first.", "err"); return; }
+  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const n = orderedIds.length;
+  const choice = await chooseLabelTemplate(`${n} selected label${n === 1 ? "" : "s"}`);
+  if (!choice) return;
+  if (choice === "html") window.open(`/labels/by-ids?ids=${orderedIds.join(",")}`, "_blank");
+  else printXlsxInBrowser(`/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`);
+});
+
+$("#labelExcelSelectedBtn")?.addEventListener("click", () => {
+  if (selectedIds.size === 0) { toast("No shipments selected.", "err"); return; }
+  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  window.location = `/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`;
+});
+
+// ============================================================
+// ENTRY-ROW TOTAL AUTO-COMPUTE
+// ============================================================
+
+function entryComputeTotal() {
+  const f = $("#newForm");
+  const w   = +f.elements["weight"].value || 0;
+  const ext = +f.elements["extra_charges"].value || 0;
+  const priceStr = (f.elements["price_input"].value || "").trim();
+  let price = 0;
+  if (priceStr) {
+    if (priceStr.startsWith("=")) {
+      try { price = evalFormula(priceStr, w, +f.elements["declared_value"].value || 0); }
+      catch (_) { price = 0; }
+    } else { price = +priceStr || 0; }
+  }
+  const total = w * price + ext;
+  f.elements["total_display"].value = total ? total.toFixed(2) : "";
+}
+
+$("#newForm").addEventListener("input", e => {
+  if (["weight","price_input","declared_value","extra_charges"].includes(e.target.name))
+    entryComputeTotal();
+});
+
+// ============================================================
+// NEW SHIPMENT — SUBMIT
+// ============================================================
+
+$("#newForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    const fd  = new FormData(e.target);
+    const obj = Object.fromEntries(fd.entries());
+    const priceInput = (obj.price_input || "").trim();
+    let price = 0, formula = "";
+    if (priceInput.startsWith("=")) {
+      formula = priceInput;
+      try { price = evalFormula(priceInput, +obj.weight || 0, +obj.declared_value || 0); }
+      catch (err) { toast("Bad formula: " + err.message, "err"); return; }
+    } else { price = parseFloat(priceInput) || 0; }
+
+    const bd = (obj.batch_date || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bd)) {
+      toast(`Batch date is invalid: "${bd}". Please re-pick from the calendar.`, "err");
+      return;
+    }
+
+    let boxNumber = null;
+    const boxRaw = (obj.box_number || "").trim();
+    if (boxRaw !== "") {
+      const n = parseInt(boxRaw, 10);
+      if (!Number.isFinite(n) || n <= 0) {
+        toast(`Box number must be a positive whole number, got "${boxRaw}".`, "err");
+        return;
+      }
+      boxNumber = n;
+    }
+
+    const payload = {
+      ...obj,
+      box_number:     boxNumber,
+      declared_value: parseFloat(obj.declared_value) || 0,
+      weight:         parseFloat(obj.weight) || 0,
+      price_formula:  formula,
+      price_aud:      price,
+      extra_charges:  parseFloat(obj.extra_charges) || 0,
+      paid:           !!obj.paid,
+    };
+    delete payload.price_input;
+    delete payload.total_display;
+
+    const res = await fetch("/api/shipments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      toast("Add failed — " + formatServerError(err), "err");
+      return;
+    }
+    const created = await res.json();
+    shipments.push(created);
+    renderTable();
+    const keepDate = obj.batch_date;
+    e.target.reset();
+    e.target.batch_date.value = keepDate;
+    e.target.sender_country.value  = "Австрали";
+    e.target.receiver_country.value = "Монгол";
+    entryComputeTotal();
+    e.target.sender_name.focus();
+    toast(`BOX ${created.box_number} (${created.mf_number}) added successfully.`);
+  } catch (err) {
+    toast("Submit failed: " + err.message, "err");
+  }
+});
+
+// ============================================================
+// TABLE INTERACTIONS
+// ============================================================
+
+const tableBody = $("#shipTable tbody");
+
+tableBody.addEventListener("click", async e => {
+  const tr = e.target.closest("tr"); if (!tr) return;
+  const id = +tr.dataset.id;
+
+  const pill = e.target.closest(".paid-pill");
+  if (pill) {
+    const ship = shipments.find(s => s.id === id);
+    const newVal = !ship.paid;
+    const r = await patchShipment(id, { paid: newVal });
+    if (r) { Object.assign(ship, r); renderTable(); toast(newVal ? "Marked as Paid" : "Marked as Unpaid"); }
+    return;
+  }
+
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const ship = shipments.find(s => s.id === id);
+  if (!ship) return;
+
+  if (btn.dataset.act === "print") {
+    const scope = `BOX ${ship.box_number} (${ship.mf_number})`;
+    const choice = await chooseLabelTemplate(scope);
+    if (!choice) return;
+    if (choice === "html") window.open(`/shipments/${ship.id}/label`, "_blank");
+    else printXlsxInBrowser(`/shipments/${ship.id}/label.xlsx`);
+    return;
+  }
+  if (btn.dataset.act === "edit") { openEdit(ship); return; }
+  if (btn.dataset.act === "delete") {
+    const ok = await customConfirm({
+      title: "Delete Shipment",
+      message: `Permanently delete BOX ${ship.box_number} (${ship.mf_number}) from ${ship.batch_date}? This cannot be undone.`,
+      okLabel: "Delete",
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/shipments/${id}`, { method: "DELETE" });
+    if (res.ok) { shipments = shipments.filter(s => s.id !== id); renderTable(); toast("Shipment deleted."); }
+    else toast("Delete failed.", "err");
+  }
+});
+
+tableBody.addEventListener("dblclick", e => {
+  const ed = e.target.closest(".ed");
+  if (!ed || ed.classList.contains("editing")) return;
+  startInlineEdit(ed);
+});
+
+function startInlineEdit(ed) {
+  const tr  = ed.closest("tr");
+  const id  = +tr.dataset.id;
+  const ship = shipments.find(s => s.id === id);
+  const field = ed.dataset.field;
+  const type  = ed.dataset.type;
+  const old   = ed.textContent;
+  ed.classList.add("editing");
+  let val = "";
+  if (field === "price")      val = ship.price_formula || ship.price_aud;
+  else if (field === "batch_date") val = ship.batch_date;
+  else if (field === "extra") val = ship.extra_charges;
+  ed.innerHTML = `<input ${type === "date" ? 'type="text"' : ""} value="${escapeAttr(val)}">`;
+  const inp = ed.querySelector("input");
+  if (field === "batch_date" && window.flatpickr) {
+    flatpickr(inp, {
+      dateFormat: "Y-m-d", defaultDate: val, locale: { firstDayOfWeek: 1 },
+      onClose: () => finish(true),
+    });
+  }
+  inp.focus(); inp.select();
+
+  const finish = async (commit) => {
+    if (!commit) { ed.textContent = old; ed.classList.remove("editing"); return; }
+    const newVal = inp.value;
+    let body = {};
+    if (field === "batch_date") body.batch_date = newVal;
+    else if (field === "price") body.price_formula = String(newVal);
+    else if (field === "extra") body.extra_charges = parseFloat(newVal) || 0;
+    const r = await patchShipment(id, body);
+    if (r) { Object.assign(ship, r); renderTable(); toast("Saved."); }
+    else   { ed.textContent = old; ed.classList.remove("editing"); }
+  };
+  inp.addEventListener("keydown", ke => {
+    if (ke.key === "Enter")  { ke.preventDefault(); finish(true); }
+    if (ke.key === "Escape") finish(false);
+  });
+  inp.addEventListener("blur", () => { if (field !== "batch_date") finish(true); });
+}
+
+async function patchShipment(id, body) {
+  const res = await fetch(`/api/shipments/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await safeJson(res);
+    toast("Update failed — " + formatServerError(err), "err");
+    return null;
+  }
+  return res.json();
+}
+
+// ============================================================
+// SORT HEADERS
+// ============================================================
+
+$$(".dataTable th.sortable").forEach(th => {
+  th.addEventListener("click", () => {
+    const k = th.dataset.sort;
+    if (sortKey === k) sortDir = sortDir === "asc" ? "desc" : "asc";
+    else { sortKey = k; sortDir = k === "batch_date" ? "desc" : "asc"; }
+    renderTable();
+  });
+});
+
+// ============================================================
+// FILTER / SEARCH
+// ============================================================
+
+$("#filterApply").addEventListener("click", () => {
+  const start = $("#filterStart").value || $("#exportDate").value;
+  const end   = $("#filterEnd").value   || $("#exportDate").value;
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end)   params.set("end",   end);
+  window.location = "/?" + params;
+});
+$("#filterClear").addEventListener("click", () => { window.location = "/"; });
+
+// ============================================================
+// EXPORT BUTTONS (Shipments panel)
+// ============================================================
+
+function rebuildExportLinks(d) {
+  d = d || $("#exportDate")?.value;
+  const buttons = [
+    ["#aircargoBtn",   "/batches/__D__/aircargo.xlsx"],
+    ["#labelsXlsxBtn", "/batches/__D__/labels.xlsx"],
+    ["#labelsAllBtn",  "/batches/__D__/labels.html"],
+  ];
+  buttons.forEach(([sel, tmpl]) => {
+    const el = $(sel);
+    if (!el) return;
+    if (!d) { el.removeAttribute("href"); el.classList.add("disabled"); }
+    else    { el.href = tmpl.replace("__D__", d); el.classList.remove("disabled"); }
+  });
+}
+
+$("#exportDate")?.addEventListener("change", () => rebuildExportLinks());
+
+["#aircargoBtn","#labelsXlsxBtn"].forEach(sel => {
+  const el = $(sel);
+  if (!el) return;
+  el.addEventListener("click", e => {
+    if (!el.getAttribute("href")) { e.preventDefault(); toast("Please pick an export batch date first.", "err"); }
+  });
+});
+
+$("#labelsAllBtn")?.addEventListener("click", async e => {
+  const d = $("#exportDate")?.value;
+  if (!d) return;
+  e.preventDefault();
+  const choice = await chooseLabelTemplate(`all labels for ${d}`);
+  if (!choice) return;
+  if (choice === "html") window.open(`/batches/${d}/labels.html`, "_blank");
+  else printXlsxInBrowser(`/batches/${d}/labels.xlsx`);
+});
+
+// ============================================================
+// LABELS PANEL — BATCH EXPORT BUTTONS
+// ============================================================
+
+function rebuildLabelPanelLinks(d) {
+  d = d || $("#labelBatchDate")?.value;
+  const defs = [
+    ["#labelAircargoBtn",   "/batches/__D__/aircargo.xlsx"],
+    ["#labelLabelsXlsxBtn", "/batches/__D__/labels.xlsx"],
+    ["#labelPrintAllBtn",   "/batches/__D__/labels.html"],
+  ];
+  defs.forEach(([sel, tmpl]) => {
+    const el = $(sel);
+    if (!el) return;
+    if (!d) { el.removeAttribute("href"); el.classList.add("disabled"); }
+    else    { el.href = tmpl.replace("__D__", d); el.classList.remove("disabled"); }
+  });
+}
+
+$("#labelBatchDate") && flatpickr && (() => {
+  // Init after flatpickr loads
+  window.addEventListener("load", () => {
+    if (!window.flatpickr) return;
+    flatpickr($("#labelBatchDate"), {
+      dateFormat: "Y-m-d",
+      altInput: true,
+      altFormat: "D, j M Y",
+      locale: { firstDayOfWeek: 1 },
+      allowInput: true,
+      onChange: (_, dateStr) => rebuildLabelPanelLinks(dateStr),
+    });
+    rebuildLabelPanelLinks();
+  });
+})();
+
+$("#labelPrintAllBtn")?.addEventListener("click", async e => {
+  const d = $("#labelBatchDate")?.value;
+  if (!d) { e.preventDefault(); toast("Please pick a batch date first.", "err"); return; }
+  e.preventDefault();
+  const choice = await chooseLabelTemplate(`all labels for ${d}`);
+  if (!choice) return;
+  if (choice === "html") window.open(`/batches/${d}/labels.html`, "_blank");
+  else printXlsxInBrowser(`/batches/${d}/labels.xlsx`);
+});
+
+// ============================================================
+// EDIT MODAL
+// ============================================================
+
+const editModal = $("#editModal");
+const editForm  = $("#editForm");
+
+function openEdit(ship) {
+  editForm.id.value = ship.id;
+  $("#editTitle").textContent = `BOX ${ship.box_number} · ${ship.mf_number}`;
+  for (const [k, v] of Object.entries(ship)) {
+    const f = editForm.elements[k];
+    if (!f) continue;
+    if (f.type === "checkbox") f.checked = !!v;
+    else f.value = v ?? "";
+  }
+  editForm.elements["price_input"].value  = ship.price_formula || ship.price_aud || "";
+  editForm.elements["extra_charges"].value = ship.extra_charges || 0;
+  editForm.elements["total_display"].value = (ship.total_aud || 0).toFixed(2);
+  updateEditPricePreview();
+  editModal.classList.remove("hidden");
+}
+
+function closeEdit() { editModal.classList.add("hidden"); }
+$("#editClose").addEventListener("click", closeEdit);
+$("#editCancel").addEventListener("click", closeEdit);
+editModal.addEventListener("click", e => { if (e.target === editModal) closeEdit(); });
+
+function getEditPrice() {
+  const v = editForm.elements["price_input"].value.trim();
+  const w = +editForm.elements["weight"].value || 0;
+  const dv = +editForm.elements["declared_value"].value || 0;
+  if (!v) return 0;
+  if (!v.startsWith("=") && !isNaN(+v)) return +v;
+  try { return evalFormula(v, w, dv); } catch { return null; }
+}
+
+function updateEditPricePreview() {
+  const tip = $("#editPricePreview");
+  const v = editForm.elements["price_input"].value.trim();
+  const r = getEditPrice();
+  if (!v)       { tip.textContent = ""; tip.className = "hint"; }
+  else if (r === null) { tip.textContent = "Bad formula"; tip.className = "hint error"; }
+  else          { tip.textContent = `= ${fmtMoney(r)}`; tip.className = "hint ok"; }
+  const w   = +editForm.elements["weight"].value || 0;
+  const ext = +editForm.elements["extra_charges"].value || 0;
+  const total = (w * (r || 0)) + ext;
+  editForm.elements["total_display"].value = total.toFixed(2);
+}
+
+["price_input","weight","declared_value","extra_charges"].forEach(n => {
+  editForm.elements[n]?.addEventListener("input", updateEditPricePreview);
+});
+
+editForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  const fd  = new FormData(editForm);
+  const obj = Object.fromEntries(fd.entries());
+  const id  = +obj.id;
+  const priceInput = (obj.price_input || "").trim();
+  let price = 0, formula = "";
+  if (priceInput.startsWith("=")) {
+    formula = priceInput;
+    try { price = evalFormula(priceInput, +obj.weight || 0, +obj.declared_value || 0); }
+    catch (err) { toast("Bad formula: " + err.message, "err"); return; }
+  } else { price = parseFloat(priceInput) || 0; }
+
+  let boxNumber = null;
+  const boxRaw = (obj.box_number || "").trim();
+  if (boxRaw !== "") {
+    const n = parseInt(boxRaw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      toast(`Box number must be a positive whole number, got "${boxRaw}".`, "err");
+      return;
+    }
+    boxNumber = n;
+  }
+
+  const payload = {
+    ...obj,
+    box_number:     boxNumber,
+    declared_value: parseFloat(obj.declared_value) || 0,
+    weight:         parseFloat(obj.weight) || 0,
+    price_formula:  formula,
+    price_aud:      price,
+    extra_charges:  parseFloat(obj.extra_charges) || 0,
+    paid:           editForm.elements["paid"].checked,
+  };
+  delete payload.id; delete payload.price_input; delete payload.total_display;
+
+  const res = await fetch(`/api/shipments/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await safeJson(res);
+    toast("Save failed — " + formatServerError(err), "err");
+    return;
+  }
+  const updated = await res.json();
+  const i = shipments.findIndex(s => s.id === id);
+  if (i >= 0) shipments[i] = updated;
+  closeEdit();
+  renderTable();
+  toast("Shipment updated successfully.");
+});
+
+// ============================================================
+// CUSTOMER AUTOCOMPLETE
+// ============================================================
+
+let acTimeout = null;
+let acActiveInput = null;
+let acIdx = -1;
+const acCache = new Map();
+const AC_CACHE_MAX = 60;
+
+function closeAutocomplete() {
+  $$(".autocomplete-list").forEach(l => l.remove());
+  acActiveInput = null;
+  acIdx = -1;
+}
+
+document.addEventListener("click", e => {
+  if (e.target.closest(".autocomplete-cell") || e.target.closest(".autocomplete-list")) return;
+  closeAutocomplete();
+});
+
+function _repositionAutocomplete() {
+  const list = document.querySelector(".autocomplete-list");
+  if (!list || !list._anchorInput) return;
+  const r = list._anchorInput.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > window.innerHeight) { closeAutocomplete(); return; }
+  list.style.top      = (r.bottom + 2) + "px";
+  list.style.left     = r.left + "px";
+  list.style.minWidth = Math.max(r.width, 280) + "px";
+}
+window.addEventListener("scroll", _repositionAutocomplete, true);
+window.addEventListener("resize", _repositionAutocomplete);
+
+function highlightMatch(text, q) {
+  if (!text) return "";
+  if (!q)    return escapeHtml(text);
+  const safe  = escapeHtml(text);
+  const safeQ = escapeHtml(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return safe.replace(new RegExp(safeQ, "gi"), m => `<mark>${m}</mark>`);
+}
+
+$$('input[data-lookup]').forEach(inp => {
+  inp.addEventListener("input", () => {
+    clearTimeout(acTimeout);
+    const q = inp.value.trim();
+    if (q.length < 3) { closeAutocomplete(); return; }
+    const side = inp.dataset.lookup;
+    acTimeout = setTimeout(async () => {
+      const cacheKey = `${side}:${q.toLowerCase()}`;
+      let items;
+      if (acCache.has(cacheKey)) {
+        items = acCache.get(cacheKey);
+      } else {
+        try {
+          const res = await fetch(`/api/customers/search?q=${encodeURIComponent(q)}&side=${side}`);
+          if (!res.ok) { showAutocomplete(inp, [], side, q, "Search failed"); return; }
+          items = await res.json();
+        } catch {
+          showAutocomplete(inp, [], side, q, "Network error"); return;
+        }
+        if (acCache.size >= AC_CACHE_MAX) acCache.delete(acCache.keys().next().value);
+        acCache.set(cacheKey, items);
+      }
+      showAutocomplete(inp, items, side, q);
+    }, 180);
+  });
+
+  inp.addEventListener("keydown", e => {
+    const list = $$(".autocomplete-list").find(l => l._anchorInput === inp);
+    if (!list) return;
+    const items = $$(".autocomplete-item", list);
+    if (!items.length) { if (e.key === "Escape") closeAutocomplete(); return; }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      acIdx = Math.min(acIdx + 1, items.length - 1);
+      items.forEach((it, i) => it.classList.toggle("active", i === acIdx));
+      items[acIdx]?.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      acIdx = Math.max(acIdx - 1, 0);
+      items.forEach((it, i) => it.classList.toggle("active", i === acIdx));
+      items[acIdx]?.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" && acIdx >= 0) {
+      e.preventDefault(); items[acIdx].click();
+    } else if (e.key === "Escape") {
+      closeAutocomplete();
+    }
+  });
+});
+
+function showAutocomplete(inp, items, side, q = "", emptyMsg = null) {
+  closeAutocomplete();
+  const list = document.createElement("div");
+  list.className = "autocomplete-list";
+  list._anchorInput = inp;
+
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "autocomplete-empty";
+    empty.textContent = emptyMsg || `No saved customers match "${q}"`;
+    list.appendChild(empty);
+    document.body.appendChild(list);
+    _repositionAutocomplete();
+    acActiveInput = inp; acIdx = -1;
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "autocomplete-header";
+  const plural = items.length === 1 ? "" : "es";
+  header.innerHTML = `<span>${items.length} match${plural}</span><span class="small">↑↓ to navigate · Enter to select</span>`;
+  list.appendChild(header);
+
+  for (const it of items) {
+    const name    = it[`${side}_name`]    || "(no name)";
+    const phone   = it[`${side}_phone`]   || "—";
+    const city    = it[`${side}_city`]    || "";
+    const addr    = it[`${side}_address`] || "";
+    const country = it[`${side}_country`] || "";
+    const row = document.createElement("div");
+    row.className = "autocomplete-item";
+    const locParts = [city, country].filter(Boolean).join(", ");
+    row.innerHTML = `
+      <div class="ai-name">${highlightMatch(name, q)}</div>
+      <div class="ai-meta">
+        <span class="ai-phone">${highlightMatch(phone, q)}</span>
+        ${locParts ? `<span class="ai-loc">· ${highlightMatch(locParts, q)}</span>` : ""}
+      </div>
+      ${addr ? `<div class="ai-addr">${highlightMatch(addr, q)}</div>` : ""}
+    `;
+    row.addEventListener("click", () => { closeAutocomplete(); askAutofillConfirmation(inp, it, side); });
+    row.addEventListener("mouseenter", () => {
+      $$(".autocomplete-item", list).forEach((el, i) => {
+        el.classList.toggle("active", el === row);
+        if (el === row) acIdx = i;
+      });
+    });
+    list.appendChild(row);
+  }
+  document.body.appendChild(list);
+  _repositionAutocomplete();
+  acActiveInput = inp; acIdx = -1;
+}
+
+// ============================================================
+// IMPORT .XLSX MODAL
+// ============================================================
+
+const importModal = $("#importModal");
+let importPickedFile = null;
+let importDatePickerInited = false;
+
+function openImportModal() {
+  importPickedFile = null;
+  $("#importFilename").textContent = "No file selected";
+  $("#importFile").value = "";
+  $("#importDate").value = "";
+  importModal.classList.remove("hidden");
+  if (!importDatePickerInited && window.flatpickr) {
+    flatpickr($("#importDate"), {
+      dateFormat: "Y-m-d",
+      altInput: true,
+      altFormat: "D, j M Y",
+      locale: { firstDayOfWeek: 1 },
+      allowInput: true,
+      onChange: () => _refreshImportSummary(),
+      onClose:  () => _refreshImportSummary(),
+    });
+    importDatePickerInited = true;
+  }
+  _refreshImportSummary();
+  setTimeout(() => $("#importDate").focus(), 60);
+}
+
+function _refreshImportSummary() {
+  const date   = $("#importDate")?.value || "";
+  const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(date);
+  const fileName = importPickedFile?.name || "";
+  $("#importPickFileBtn").disabled = !dateOk;
+  const sum = $("#importSummary");
+  if (dateOk && fileName) {
+    sum.classList.remove("hidden");
+    $("#importSummaryDate").textContent = date;
+    $("#importSummaryFile").textContent = fileName;
+    $("#importMfPreview").textContent   = date.slice(2).replace(/-/g, "");
+  } else {
+    sum.classList.add("hidden");
+  }
+  $("#importGo").disabled = !(dateOk && fileName);
+}
+
+$("#importBtn").addEventListener("click", openImportModal);
+$("#importPickFileBtn")?.addEventListener("click", () => $("#importFile").click());
+
+$("#importFile").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  importPickedFile = f;
+  $("#importFilename").textContent = `Selected: ${f.name}`;
+  if (!$("#importDate").value) {
+    const inferred = inferDateFromName(f.name) || "";
+    if (inferred) $("#importDate").value = inferred;
+  }
+  _refreshImportSummary();
+});
+$("#importDate")?.addEventListener("input", _refreshImportSummary);
+$("#importDate")?.addEventListener("change", _refreshImportSummary);
+
+function inferDateFromName(name) {
+  let m = name.match(/(\d{2})[_\-](\d{2})[_\-](\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  m = name.match(/(\d{4})[_\-](\d{2})[_\-](\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return null;
+}
+
+$("#importClose").addEventListener("click", () => importModal.classList.add("hidden"));
+$("#importCancel").addEventListener("click", () => importModal.classList.add("hidden"));
+
+$("#importGo").addEventListener("click", async () => {
+  if (!importPickedFile) { toast("Please pick an .xlsx file first.", "err"); return; }
+  const fname = importPickedFile.name || "";
+  if (!/\.(xlsx|xlsm)$/i.test(fname)) {
+    toast(`"${fname}" is not a .xlsx file. Please pick an Excel workbook.`, "err"); return;
+  }
+  const date = $("#importDate").value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) {
+    toast("Please pick a valid batch date (YYYY-MM-DD).", "err"); return;
+  }
+  const goBtn = $("#importGo");
+  goBtn.disabled = true; goBtn.textContent = "Importing…";
+  try {
+    const buf = await importPickedFile.arrayBuffer();
+    const res = await fetch(`/api/batches/${date}/import-aircargo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: buf,
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      toast("Import failed — " + formatServerError(err || { detail: res.statusText }), "err");
+      return;
+    }
+    const r = await res.json();
+    let msg = `Imported ${r.added} shipment${r.added === 1 ? "" : "s"}`;
+    if (r.skipped) msg += ` (${r.skipped} non-BOX rows skipped)`;
+    if (r.errors && r.errors.length) msg += ` · ${r.errors.length} row warning(s)`;
+    toast(msg);
+    importModal.classList.add("hidden");
+    // Redirect to the imported batch date so BOX 1 appears first on page 1
+    setTimeout(() => {
+      window.location = `/?start=${date}&end=${date}`;
+    }, 900);
+  } catch (err) {
+    toast("Import failed: " + err.message, "err");
+  } finally {
+    goBtn.disabled = false; goBtn.textContent = "Import Shipments";
+  }
+});
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+
+async function loadDashboard() {
+  try {
+    const res = await fetch("/api/dashboard");
+    if (!res.ok) return;
+    const d = await res.json();
+    const m = d.this_month;
+    const a = d.all_time;
+
+    // KPI cards
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set("#kpiShipments",  fmt0(m.shipments));
+    set("#kpiMonthLabel", d.this_month_label || "This Month");
+    set("#kpiWeight",     fmt2(m.weight) + " kg");
+    set("#kpiRevenue",    fmtMoney(m.revenue));
+    set("#kpiPaid",       fmtMoney(m.paid));
+    set("#kpiPaidCount",  `${m.paid_count || 0} shipment${(m.paid_count || 0) === 1 ? "" : "s"}`);
+    set("#kpiUnpaid",     fmtMoney(m.unpaid));
+    set("#kpiUnpaidCount",`${m.unpaid_count || 0} shipment${(m.unpaid_count || 0) === 1 ? "" : "s"}`);
+    set("#kpiAllTime",    fmt0(a.shipments));
+    set("#kpiAllTimeRev", fmtMoney(a.revenue) + " total revenue");
+
+    // System status badge
+    const hs = $("#healthStatus");
+    if (hs) { hs.textContent = "● System Online"; hs.style.color = "var(--success)"; }
+
+    // Batch table
+    const tbody = $("#dashBatchRows");
+    if (tbody) {
+      if (!d.latest_batches || !d.latest_batches.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:14px;text-align:center;">No batch records yet.</td></tr>`;
+      } else {
+        tbody.innerHTML = d.latest_batches.map(b => `
+          <tr>
+            <td>
+              <a href="#" class="muted-link" onclick="event.preventDefault();$('#exportDate').value='${b.date}';rebuildExportLinks();switchPanel('shipments');" title="View batch ${b.date}">
+                <strong style="font-family:monospace;font-size:12px;">${b.date}</strong>
+              </a>
+            </td>
+            <td class="num">${fmt0(b.shipments)}</td>
+            <td class="num">${fmt2(b.weight)}</td>
+            <td class="num">${fmtMoney(b.revenue)}</td>
+            <td class="num" style="color:var(--success);font-weight:600;">${fmtMoney(b.paid)}</td>
+            <td class="num" style="color:${b.unpaid > 0 ? "var(--danger)" : "var(--muted)"};">${fmtMoney(b.unpaid)}</td>
+          </tr>`).join("");
+      }
+    }
+  } catch (e) {
+    console.warn("[Mon Freight] Dashboard load failed:", e);
+  }
+}
+
+// ============================================================
+// CUSTOMERS PANEL
+// ============================================================
+
+async function loadCustomers() {
+  const q = $("#customerSearch")?.value || "";
+  const tbody = $("#customerTable tbody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="6" class="muted small" style="padding:16px;text-align:center;">Loading…</td></tr>`;
+  try {
+    const res = await fetch(`/api/customers?q=${encodeURIComponent(q)}&limit=200`);
+    if (!res.ok) { tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:16px;text-align:center;">Failed to load customers.</td></tr>`; return; }
+    const rows = await res.json();
+    const count = $("#customerCount");
+    if (count) count.textContent = `${rows.length} customer record${rows.length === 1 ? "" : "s"}`;
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:16px;text-align:center;">No customers found${q ? ` matching "${q}"` : ""}.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(c => `
+      <tr>
+        <td><span class="side-badge ${c.side}">${c.side === "sender" ? "Sender" : "Receiver"}</span></td>
+        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td>${escapeHtml(c.phone)}</td>
+        <td>${escapeHtml(c.city || "—")}</td>
+        <td class="muted">${escapeHtml(c.address || "—")}</td>
+        <td class="muted small">${escapeHtml(c.last_batch || "")}</td>
+      </tr>`).join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:16px;text-align:center;">Error loading customers.</td></tr>`;
+    console.warn("[Mon Freight] Customer load failed:", e);
+  }
+}
+
+let custTimer = null;
+$("#customerSearch")?.addEventListener("input", () => {
+  clearTimeout(custTimer);
+  custTimer = setTimeout(loadCustomers, 300);
+});
+$("#customerRefresh")?.addEventListener("click", loadCustomers);
+
+// ============================================================
+// REPORTS PANEL
+// ============================================================
+
+async function loadReports(start, end) {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end)   params.set("end",   end);
+  const tbody = $("#reportTableBody");
+  const footer = $("#reportFooter");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="9" class="muted" style="padding:16px;text-align:center;">Loading…</td></tr>`;
+
+  try {
+    const res = await fetch(`/api/reports?${params}`);
+    if (!res.ok) { tbody.innerHTML = `<tr><td colspan="9" class="muted" style="padding:16px;text-align:center;">Failed to load reports.</td></tr>`; return; }
+    const data = await res.json();
+    const s = data.summary;
+
+    // Summary KPIs
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set("#rptBatches",   fmt0(s.batches));
+    set("#rptShipments", fmt0(s.shipments));
+    set("#rptWeight",    fmt2(s.weight) + " kg");
+    set("#rptRevenue",   fmtMoney(s.revenue));
+
+    // Batch table
+    if (!data.batches.length) {
+      tbody.innerHTML = `<tr><td colspan="9" class="muted" style="padding:16px;text-align:center;">No batches found for the selected period.</td></tr>`;
+      if (footer) footer.textContent = "";
+      return;
+    }
+
+    tbody.innerHTML = data.batches.map(b => {
+      const pctPaid = b.revenue > 0 ? Math.round((b.paid / b.revenue) * 100) : 0;
+      const pillColor = pctPaid === 100 ? "var(--success)" : pctPaid > 0 ? "var(--warn)" : "var(--muted)";
+      return `
+        <tr>
+          <td>
+            <a href="/batches/${b.date}/aircargo.xlsx" class="date-link" title="Download Air Cargo manifest">${b.date}</a>
+          </td>
+          <td class="num">${fmt0(b.shipments)}</td>
+          <td class="num">${fmt2(b.weight)}</td>
+          <td class="num">${fmtMoney(b.declared_value)}</td>
+          <td class="num"><strong>${fmtMoney(b.revenue)}</strong></td>
+          <td class="num" style="color:var(--success);">${fmtMoney(b.paid)}</td>
+          <td class="num" style="color:${b.unpaid > 0 ? "var(--danger)" : "var(--muted)"};">${fmtMoney(b.unpaid)}</td>
+          <td class="num"><span style="color:${pillColor};font-weight:700;">${pctPaid}%</span></td>
+          <td>
+            <a class="btn small" href="/batches/${b.date}/aircargo.xlsx" title="Air Cargo .xlsx">📄</a>
+            <a class="btn small" href="/batches/${b.date}/labels.xlsx"   title="Labels .xlsx">🏷</a>
+          </td>
+        </tr>`;
+    }).join("");
+
+    if (footer) {
+      const range = (start && end) ? `${start} to ${end}` : start ? `from ${start}` : end ? `to ${end}` : "All time";
+      footer.textContent = `${data.batches.length} batch${data.batches.length === 1 ? "" : "es"} · ${fmt0(s.shipments)} shipments · ${fmtMoney(s.revenue)} revenue · ${range}`;
+    }
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" class="muted" style="padding:16px;text-align:center;">Error loading report data.</td></tr>`;
+    console.warn("[Mon Freight] Report load failed:", e);
+  }
+}
+
+$("#reportApply")?.addEventListener("click", () => {
+  const s = $("#reportStart")?.value;
+  const e = $("#reportEnd")?.value;
+  loadReports(s || undefined, e || undefined);
+});
+$("#reportClear")?.addEventListener("click", () => {
+  if ($("#reportStart")) $("#reportStart").value = "";
+  if ($("#reportEnd"))   $("#reportEnd").value   = "";
+  loadReports();
+});
+
+// ============================================================
+// SETTINGS PANEL — HEALTH CHECK
+// ============================================================
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/health");
+    if (!res.ok) return;
+    const d = await res.json();
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set("#settingsDbKind",    d.ok ? (d.db_url_kind === "sqlite" ? "SQLite (local)" : "PostgreSQL") : "Error");
+    set("#settingsShipCount", d.ok ? `${fmt0(d.shipment_count)} records` : "—");
+    set("#settingsHealth",    d.ok ? "Connected ✓" : "Error — " + (d.error || "unknown"));
+    if (d.ok) {
+      const el = $("#settingsHealth");
+      if (el) { el.style.background = "var(--paid-bg)"; el.style.color = "var(--paid-fg)"; }
+    }
+  } catch (e) {
+    console.warn("[Mon Freight] Settings health check failed:", e);
+  }
+  loadAdminSections();
+}
+
+// ============================================================
+// AUTH — current user, logout
+// ============================================================
+
+let CURRENT_USER = null;
+
+async function authFetch(url, opts) {
+  const res = await fetch(url, opts);
+  if (res.status === 401) { window.location.href = "/login"; throw new Error("Signed out"); }
+  return res;
+}
+
+async function initAuth() {
+  try {
+    const res = await fetch("/auth/me");
+    if (res.status === 401) { window.location.href = "/login"; return; }
+    CURRENT_USER = await res.json();
+    const chip = $("#userChip");
+    if (chip) chip.textContent =
+      `${CURRENT_USER.username}${CURRENT_USER.role === "admin" ? " (admin)" : ""}`;
+  } catch (e) { console.warn("auth check failed", e); }
+}
+initAuth();
+
+$("#logoutBtn")?.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/auth/logout", { method: "POST" });
+    const d = await res.json();
+    window.location.href = d.redirect || "/login";
+  } catch { window.location.href = "/login"; }
+});
+
+// ============================================================
+// SETTINGS — USER MANAGEMENT (admin)
+// ============================================================
+
+async function loadAdminSections() {
+  if (!CURRENT_USER) await initAuth();
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "admin";
+  $("#usersCard")?.classList.toggle("hidden", !isAdmin);
+  $("#backupCard")?.classList.toggle("hidden", !isAdmin);
+  if (!isAdmin) return;
+  const badge = $("#smsModeBadge");
+  if (badge) badge.innerHTML = CURRENT_USER.sms_configured
+    ? `<span style="color:var(--success);font-weight:600;">SMS delivery: Twilio ✓</span>`
+    : `<span style="color:var(--danger);font-weight:600;">SMS not configured —
+       codes are shown on the login page (DEV MODE). Set the Twilio
+       environment variables before go-live.</span>`;
+  loadUsers();
+  loadBackups();
+}
+
+async function loadUsers() {
+  const tbody = $("#usersTable tbody");
+  if (!tbody) return;
+  try {
+    const res = await authFetch("/api/users");
+    const users = await res.json();
+    tbody.innerHTML = users.map(u => `
+      <tr>
+        <td><strong>${escapeHtml(u.username)}</strong></td>
+        <td>${escapeHtml(u.phone || "—")}</td>
+        <td>${u.role}</td>
+        <td>${u.active ? "active" : `<span style="color:var(--danger);">disabled</span>`}</td>
+        <td class="small">${u.last_login ? u.last_login.slice(0, 16).replace("T", " ") + " UTC" : "never"}</td>
+        <td>
+          <button class="btn small" onclick="resetUserPassword(${u.id}, '${escapeHtml(u.username)}')">Password</button>
+          <button class="btn small" onclick="editUserPhone(${u.id}, '${escapeHtml(u.phone || "")}')">Mobile</button>
+          <button class="btn small" onclick="toggleUserActive(${u.id}, ${u.active})">${u.active ? "Disable" : "Enable"}</button>
+          <button class="btn small danger" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">✕</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6" class="muted">No users.</td></tr>`;
+  } catch (e) { console.warn(e); }
+}
+
+async function userPatch(id, body) {
+  const res = await authFetch(`/api/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(formatServerError(d), "err"); return false; }
+  return true;
+}
+
+window.resetUserPassword = async (id, name) => {
+  const p = prompt(`New password for "${name}" (min 8 characters):`);
+  if (!p) return;
+  if (await userPatch(id, { password: p })) { toast("Password updated"); loadUsers(); }
+};
+window.editUserPhone = async (id, current) => {
+  const p = prompt("Mobile number(s), E.164 format, comma-separated for several (e.g. +61400123456,+97699112233):", current);
+  if (p === null) return;
+  if (await userPatch(id, { phone: p.trim() })) { toast("Mobile updated"); loadUsers(); }
+};
+window.toggleUserActive = async (id, active) => {
+  if (await userPatch(id, { active: !active })) { toast(active ? "User disabled" : "User enabled"); loadUsers(); }
+};
+window.deleteUser = async (id, name) => {
+  if (!confirm(`Delete user "${name}" permanently?`)) return;
+  const res = await authFetch(`/api/users/${id}`, { method: "DELETE" });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(formatServerError(d), "err"); return; }
+  toast("User deleted");
+  loadUsers();
+};
+
+$("#addUserBtn")?.addEventListener("click", async () => {
+  const body = {
+    username: $("#nuUsername").value.trim(),
+    password: $("#nuPassword").value,
+    phone: $("#nuPhone").value.trim(),
+    role: $("#nuRole").value,
+  };
+  if (!body.username || !body.password) { toast("Username and password required", "err"); return; }
+  const res = await authFetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(formatServerError(d), "err"); return; }
+  toast(`User "${d.username}" created`);
+  $("#nuUsername").value = $("#nuPassword").value = $("#nuPhone").value = "";
+  loadUsers();
+});
+
+// ============================================================
+// SETTINGS — BACKUP & RESTORE (admin)
+// ============================================================
+
+function fmtBytes(n) {
+  if (!n) return "—";
+  if (n > 1048576) return (n / 1048576).toFixed(1) + " MB";
+  return (n / 1024).toFixed(0) + " KB";
+}
+
+async function loadBackups() {
+  const tbody = $("#backupsTable tbody");
+  if (!tbody) return;
+  try {
+    const res = await authFetch("/api/backups");
+    const d = await res.json();
+    $("#backupSchedule").textContent =
+      `Daily at ${d.schedule_utc} UTC · keep ${d.retention_days} days`;
+    const drv = $("#backupDrive");
+    drv.textContent = d.drive_configured ? "Google Drive ✓" : "Local disk only — Drive not configured";
+    drv.classList.toggle("warn", !d.drive_configured);
+    const real = d.backups.filter(b => !b.pre_restore);
+    $("#backupLast").textContent = real.length
+      ? `${(real[0].created_at || "").slice(0, 16).replace("T", " ")} UTC`
+      : "No backups yet";
+    tbody.innerHTML = d.backups.map(b => `
+      <tr>
+        <td class="small">${escapeHtml(b.name)}${b.pre_restore ? ' <span class="muted">(safety snapshot)</span>' : ""}</td>
+        <td class="small">${(b.created_at || "").slice(0, 16).replace("T", " ")}</td>
+        <td>${fmtBytes(b.size)}</td>
+        <td class="small">${[b.local ? "Server" : "", b.drive ? "Drive" : ""].filter(Boolean).join(" + ") || "—"}</td>
+        <td>
+          <a class="btn small" href="/api/backups/download/${encodeURIComponent(b.name)}">⬇ Download</a>
+          <button class="btn small danger" onclick="askRestore('${escapeHtml(b.name)}')">Restore</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="5" class="muted">No backups yet.</td></tr>`;
+  } catch (e) { console.warn(e); }
+}
+
+$("#runBackupBtn")?.addEventListener("click", async () => {
+  const btn = $("#runBackupBtn");
+  btn.disabled = true; btn.textContent = "Backing up…";
+  try {
+    const res = await authFetch("/api/backups/run", { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) { toast(formatServerError(d), "err"); }
+    else toast(`Backup created: ${d.name}` +
+               (d.uploaded_to_drive ? " (uploaded to Drive)" : ""));
+    loadBackups();
+  } catch (e) { toast(String(e), "err"); }
+  btn.disabled = false; btn.textContent = "Run Backup Now";
+});
+
+let _restoreTarget = null;
+window.askRestore = (name) => {
+  _restoreTarget = name;
+  $("#restoreModalName").textContent = name;
+  $("#restoreModal").style.display = "flex";
+};
+$("#restoreCancelBtn")?.addEventListener("click", () => {
+  $("#restoreModal").style.display = "none";
+  _restoreTarget = null;
+});
+$("#restoreConfirmBtn")?.addEventListener("click", async () => {
+  if (!_restoreTarget) return;
+  const btn = $("#restoreConfirmBtn");
+  btn.disabled = true; btn.textContent = "Restoring…";
+  try {
+    const res = await authFetch("/api/backups/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: _restoreTarget, confirm: true }),
+    });
+    const d = await res.json();
+    if (!res.ok) toast(formatServerError(d), "err");
+    else {
+      toast(`Restore complete — safety snapshot: ${d.safety_snapshot}`);
+      setTimeout(() => window.location.reload(), 1800);
+    }
+  } catch (e) { toast(String(e), "err"); }
+  btn.disabled = false; btn.textContent = "Yes, Restore Now";
+  $("#restoreModal").style.display = "none";
+  _restoreTarget = null;
+});
+
+// ============================================================
+// AUTOFILL CONFIRMATION
+// ============================================================
+
+function askAutofillConfirmation(inp, item, side) {
+  const modal = $("#autofillModal");
+  if (!modal) { applyAutofill(inp, item, side); return; }
+  const fields = [
+    [`${side}_name`,    "Name"],
+    [`${side}_phone`,   "Phone"],
+    [`${side}_address`, "Address"],
+    [`${side}_city`,    "City"],
+    [`${side}_country`, "Country"],
+  ];
+  if (side === "sender") fields.push(["sender_postal", "Postcode"]);
+  $("#autofillPreview").innerHTML = `
+    <p class="muted small" style="margin-top:0;">
+      Apply these <strong>${side}</strong> details to the new shipment?
+    </p>
+    <table class="autofill-table">
+      ${fields.map(([k, label]) => `<tr><th>${label}</th><td>${escapeHtml(item[k] || "—")}</td></tr>`).join("")}
+    </table>
+  `;
+  modal.classList.remove("hidden");
+  const ok    = $("#autofillOk");
+  const cancel = $("#autofillCancel");
+  const close  = $("#autofillClose");
+  function cleanup() {
+    modal.classList.add("hidden");
+    ok.removeEventListener("click", onOk);
+    cancel.removeEventListener("click", onCancel);
+    close.removeEventListener("click", onCancel);
+  }
+  const onOk     = () => { cleanup(); applyAutofill(inp, item, side); };
+  const onCancel = () => { cleanup(); inp.focus(); };
+  ok.addEventListener("click", onOk);
+  cancel.addEventListener("click", onCancel);
+  close.addEventListener("click", onCancel);
+}
+
+function applyAutofill(inp, item, side) {
+  const form = inp.closest("form");
+  Object.entries(item).forEach(([k, v]) => {
+    const target = form.elements[k];
+    if (target && v) target.value = v;
+  });
+  const nextField = side === "sender" ? "receiver_name" : "description";
+  form.elements[nextField]?.focus();
+  toast(`Autofilled from ${item[`${side}_name`] || "saved customer"}.`);
+}
+
+// ============================================================
+// FLATPICKR INIT
+// ============================================================
+
+function initFlatpickr() {
+  if (!window.flatpickr) { console.warn("[Mon Freight] Flatpickr not loaded — date inputs will be plain text."); return; }
+  const base = {
+    dateFormat: "Y-m-d",
+    altInput:   true,
+    altFormat:  "D, j M Y",
+    locale:     { firstDayOfWeek: 1 },
+    allowInput: true,
+  };
+  flatpickr($("#newForm").elements["batch_date"],  base);
+  flatpickr(editForm.elements["batch_date"],        base);
+  flatpickr($("#filterStart"), base);
+  flatpickr($("#filterEnd"),   base);
+  flatpickr($("#exportDate"),  {
+    ...base,
+    onChange: (_, dateStr) => {
+      rebuildExportLinks(dateStr);
+      // Selecting a batch date filters the Shipment Records table to that batch.
+      // Clearing the date (dateStr === "") returns to the unfiltered view.
+      if (dateStr) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("start", dateStr);
+        url.searchParams.set("end",   dateStr);
+        // Preserve any existing search query
+        if (window.SEARCH_Q) url.searchParams.set("q", window.SEARCH_Q);
+        else url.searchParams.delete("q");
+        window.location = url.toString();
+      }
+    },
+    onReady: (_, dateStr, fp) => {
+      // If the page already has an active single-batch filter, show a hint
+      if (_filterStart && _filterStart === _filterEnd) {
+        const el = fp.input.closest("label");
+        if (el) el.title = `Filtered to batch ${_filterStart}`;
+      }
+    },
+  });
+  // Batch Date quick-filter (above Shipments Records table)
+  const bfd = $("#batchFilterDate");
+  if (bfd) {
+    flatpickr(bfd, {
+      ...base,
+      // Restrict to dates that actually have batches (if ALL_DATES is populated)
+      enable: window.ALL_DATES && window.ALL_DATES.length ? window.ALL_DATES : undefined,
+      onChange: (_, dateStr) => {
+        if (dateStr) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("start", dateStr);
+          url.searchParams.set("end",   dateStr);
+          if (window.SEARCH_Q) url.searchParams.set("q", window.SEARCH_Q);
+          else url.searchParams.delete("q");
+          url.searchParams.delete("page");
+          window.location = url.toString();
+        }
+      },
+    });
+  }
+
+  // Reports date pickers
+  const rStart = $("#reportStart");
+  const rEnd   = $("#reportEnd");
+  if (rStart) flatpickr(rStart, base);
+  if (rEnd)   flatpickr(rEnd,   base);
+  // Labels panel batch date
+  const lbd = $("#labelBatchDate");
+  if (lbd) flatpickr(lbd, {
+    ...base,
+    onChange: (_, dateStr) => rebuildLabelPanelLinks(dateStr),
+  });
+}
+
+initFlatpickr();
+rebuildExportLinks();
+rebuildLabelPanelLinks?.();
+
+// ============================================================
+// INITIAL RENDER
+// ============================================================
+
+renderTable();
+// Dashboard loaded by switchPanel on init

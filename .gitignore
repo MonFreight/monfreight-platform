@@ -1,0 +1,20 @@
+# --- never push these ---
+# live database, backups, secrets
+data/
+# admin reset script (contains the password)
+reset_admin.py
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# dev/test artifacts
+_test_multi_render.html
+multi_label_test.html
+excel_labels_preview.html
+nohup.out

@@ -1,0 +1,170 @@
+{# Mon Freight CP72/CN23 customs label — exact-match layout for the PDF
+   template. Expects: s (dict), description_clean, receiver_full_address,
+   batch_date_str. #}
+<div class="sheet">
+
+  <!-- ============== 1. Header band ============== -->
+  <table class="grid sec-header">
+    <colgroup>
+      <col style="width:30%"><col style="width:42%"><col style="width:28%">
+    </colgroup>
+    <tr>
+      <td class="c-brand">
+        <div class="brand-row">
+          <img src="/static/logo.png" class="lbl-logo"
+               onerror="this.style.display='none'">
+          <div class="brand-text">Mon Freight Pty Ltd</div>
+        </div>
+      </td>
+      <td class="c-green-mf">
+        <div class="green-tag">Green</div>
+        <div class="mf-num">{{ s.mf_number }}AU</div>
+      </td>
+      <td class="c-decl">
+        DISPATCH NOTE/CUSTOMS<br>
+        DECLARATION<br>
+        <span class="cp">CP72/CN23</span>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ============== 2. FROM / TO ============== -->
+  <table class="grid sec-fromto">
+    <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+    <tr class="head">
+      <td><strong>FROM:</strong></td>
+      <td><strong>TO:</strong></td>
+    </tr>
+    <tr>
+      <td><span class="ll">Name:</span> <span class="val val-bold">{{ s.sender_name }}</span></td>
+      <td><span class="ll">Name:</span> <span class="val val-bold">{{ s.receiver_name }}</span></td>
+    </tr>
+    <tr>
+      <td><span class="ll">Address:</span> <span class="val">Монголоос бусад Монголоос бусад Монголоос бусад</span></td>
+      <td><span class="ll">Address:</span> <span class="val">{{ receiver_full_address }}</span></td>
+    </tr>
+    <tr class="ptc-row">
+      <td>
+        <table class="ptc">
+          <tr><th>Postal code</th><th>Country</th><th>Telephone</th></tr>
+          <tr><td>{{ s.sender_postal }}</td><td><strong>AU</strong></td><td><strong>(+61){{ s.sender_phone }}</strong></td></tr>
+        </table>
+      </td>
+      <td>
+        <table class="ptc">
+          <tr><th>Postal code</th><th>Country</th><th>Telephone</th></tr>
+          <tr><td></td><td><strong>Монгол</strong></td><td><strong>{{ s.receiver_phone }}</strong></td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ============== 3. Items table ============== -->
+  <table class="grid sec-items">
+    <colgroup>
+      <col style="width:48%">
+      <col style="width:18%">
+      <col style="width:14%">
+      <col style="width:20%">
+    </colgroup>
+    <tr class="head">
+      <th>Илгээлтийн доторх зүйлсийн тайлбар<br><span class="en">Detailed description of contents</span></th>
+      <th>Тоо хэмжээ<br><span class="en">Number of items contained</span></th>
+      <th>Жин хэмжээ<br><span class="en">Net Weight</span></th>
+      <th>Нийт үнэ<br><span class="en">Total price</span></th>
+    </tr>
+    <tr>
+      <td><span class="seq">1</span> &nbsp; {{ description_clean }}</td>
+      <td class="c">1</td>
+      <td class="c">&nbsp;</td>
+      <td class="c"><strong>${{ "%.2f"|format(s.declared_value or 0) }}</strong> &nbsp;<span class="cur">AUD</span></td>
+    </tr>
+  </table>
+
+  <!-- ============== 4. Item type / Handling / Totals ============== -->
+  <table class="grid sec-options">
+    <colgroup><col style="width:33%"><col style="width:33%"><col style="width:34%"></colgroup>
+    <tr>
+      <td class="opt-cell">
+        <div class="opt-h">Илгээлт доторх зүйл<br><span class="en">Enter a cross (x) if the item contain</span></div>
+        <div class="ck"><span class="cb"></span> Бэлэг / <span class="en">Gift</span></div>
+        <div class="ck"><span class="cb"></span> Арилжааны шинж чанаргүй загвар<br><span class="en">Samples of merchandise with no commercial value</span></div>
+        <div class="ck"><span class="cb"></span> Арилжааны шинж чанаргүй бичиг баримт<br><span class="en">Documents with with no commercial value</span></div>
+      </td>
+      <td class="opt-cell">
+        <div class="opt-h">Явуулах чиглэлээ сонгоно уу<br><span class="en">Choose type of handing desired</span></div>
+        <div class="ck"><span class="cb checked"></span> Агаар/Air</div>
+        <div class="ck"><span class="cb"></span> Төмөр зам</div>
+        <div class="ck"><span class="cb"></span> Авто зам</div>
+        <div class="sdr">Зээлжих тусгай эрх &nbsp; тоогоор(numerials)<br>SDR ____________</div>
+      </td>
+      <td class="totals-cell">
+        <div class="kv2"><span>Нийт жин<br><span class="en">Total gross weight</span></span><strong>{{ s.weight }} кг</strong></div>
+        <div class="kv2"><span>Тариф үнэ<br><span class="en">Postage</span></span><strong>$10.00</strong></div>
+        <div class="kv2"><span>Item Currency</span><strong>AUD</strong></div>
+        <div class="hour">Илгээсэн цаг/<span class="en">Hour</span></div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ============== 5. Insurance ============== -->
+  <table class="grid sec-insurance">
+    <colgroup>
+      <col style="width:25%"><col style="width:14%"><col style="width:41%"><col style="width:20%">
+    </colgroup>
+    <tr>
+      <td class="ins-label">Даатгалтай илгээмж байгаа бол X тэмдэгт тавина уу<br><span class="en">Enter cross (X) if the item is insured</span></td>
+      <td class="ins-check"><span class="cb"></span> Даатгалтай<br><span class="en">Insured</span></td>
+      <td class="ins-words"><span class="lbl">Даатгалтай хэмжээ (үсгээр) / <span class="en">Insured value (words)</span></span></td>
+      <td class="ins-recip">Хүлээн авагч<br>төлбөр хийх эсэх</td>
+    </tr>
+  </table>
+
+  <!-- ============== 6. Instructions / Returns / Barcode ============== -->
+  <table class="grid sec-instr">
+    <colgroup><col style="width:38%"><col style="width:36%"><col style="width:26%"></colgroup>
+    <tr>
+      <td class="inst-text">
+        <div class="en">INSTRUCTION TO GIVEN BY THE SENDER in case of non delivery of the parcel. Every parcel returned or redirected shall be subject to the postage rates entailed.</div>
+        <div class="mn">ИЛГЭЭЛТ НЬ ХҮРГЭГДЭЭГҮЙ ТОХИОЛДОЛД ЯВУУЛАГЧААС АНХААРАХ ЗҮЙЛ: Илгээлт нь шуудангийн төлбөрийн дагуу буцаах буюу шинэ хаягаар хүргэгдэнэ.</div>
+      </td>
+      <td class="returns">
+        <div class="ck"><span class="cb"></span> Явуулагч руу яаралтай буцаах<br><span class="en">Return to origin immediately</span></div>
+        <div class="ck"><span class="cb"></span> Явуулагч руу буцаах __ өдрийн дараа<br><span class="en">Return to sender after __ days</span></div>
+        <div class="ck"><span class="cb"></span> Өөр хаягаар явуулах<br><span class="en">Deliver new address</span></div>
+        <div class="addr-line">Хаяг: ______________________________</div>
+        <div class="addr-line">Address: _____________________________</div>
+        <div class="dir-row">
+          <span class="ck inline"><span class="cb"></span> Агаар/Air</span>
+          <span class="ck inline"><span class="cb"></span> Төмөр зам</span>
+          <span class="ck inline"><span class="cb"></span> Авто зам</span>
+        </div>
+      </td>
+      <td class="stamp-bc">
+        <div class="stamp-label">Өдрийн тэмдэгт<br><span class="en">Daily stamp</span></div>
+        <svg class="barcode-svg" data-mf="{{ s.mf_number }}AU"></svg>
+        <div class="bc-text">{{ s.mf_number }}AU</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ============== 7. Date / Treat / Signature ============== -->
+  <table class="grid sec-date">
+    <colgroup><col style="width:38%"><col style="width:36%"><col style="width:26%"></colgroup>
+    <tr>
+      <td class="date-cell">
+        <div class="lbl">Илгээсэн өдөр / <span class="en">Date mailed</span></div>
+        <div class="big-date">{{ batch_date_str }}</div>
+      </td>
+      <td class="abandon">
+        <span class="cb"></span> Тэнд нь устгах<br><span class="en">Treat as abandoned</span>
+      </td>
+      <td class="sig">
+        <div class="lbl">Илгээгчийн гарын үсэг / <span class="en">Sender signature</span></div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ============== 8. BOX banner ============== -->
+  <div class="box-banner">BOX {{ s.box_number }}</div>
+</div>

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in — Mon Freight</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { display:flex; align-items:center; justify-content:center;
+         min-height:100vh; background:linear-gradient(160deg,#0f3d47 0%,#1a5a68 60%,#2c7a8c 100%); }
+  .login-card { background:var(--surface); border-radius:14px; padding:36px 34px 30px;
+                width:100%; max-width:380px; box-shadow:0 18px 50px rgba(0,0,0,.35); }
+  .login-brand { display:flex; align-items:center; gap:12px; margin-bottom:26px; }
+  .login-brand img { width:46px; height:46px; border-radius:10px; object-fit:contain; }
+  .login-brand .logo-fallback { width:46px; height:46px; border-radius:10px;
+       background:var(--accent); color:#fff; display:flex; align-items:center;
+       justify-content:center; font-weight:800; font-size:18px; }
+  .login-brand-name { font-weight:800; letter-spacing:2px; font-size:16px; color:var(--brand); }
+  .login-brand-tag  { font-size:11px; color:var(--muted); margin-top:1px; }
+  .login-card h1 { font-size:17px; margin:0 0 4px; color:var(--ink); }
+  .login-sub { font-size:12px; color:var(--muted); margin:0 0 20px; }
+  .login-field { margin-bottom:14px; }
+  .login-field label { display:block; font-size:11px; font-weight:600;
+       color:var(--ink-soft); margin-bottom:5px; letter-spacing:.3px; }
+  .login-field input { width:100%; box-sizing:border-box; padding:10px 12px;
+       border:1px solid #cbd5e1; border-radius:8px; font-size:14px; outline:none; }
+  .login-field input:focus { border-color:var(--brand-light); box-shadow:0 0 0 3px var(--brand-soft); }
+  .login-btn { width:100%; padding:11px; border:none; border-radius:8px; cursor:pointer;
+       background:var(--brand); color:#fff; font-size:14px; font-weight:600; margin-top:4px; }
+  .login-btn:hover { background:var(--brand-mid); }
+  .login-btn[disabled] { opacity:.55; cursor:default; }
+  .login-error { background:var(--danger-bg); color:var(--danger); border-radius:8px;
+       padding:9px 12px; font-size:12px; margin-bottom:14px; display:none; }
+  .login-info  { background:var(--brand-pale); color:var(--brand); border-radius:8px;
+       padding:9px 12px; font-size:12px; margin-bottom:14px; display:none; }
+  .dev-banner { background:var(--accent-soft); color:#92400e; border-radius:8px;
+       padding:10px 12px; font-size:12px; margin-bottom:14px; display:none; }
+  .dev-banner b { font-size:18px; letter-spacing:4px; display:block; margin-top:4px; }
+  #codeInput { text-align:center; font-size:22px; letter-spacing:10px; font-weight:700; }
+  .login-links { display:flex; justify-content:space-between; margin-top:14px; }
+  .login-links a { font-size:12px; color:var(--brand-light); text-decoration:none; }
+  .login-links a:hover { text-decoration:underline; }
+  .login-links a.disabled { color:var(--muted); pointer-events:none; }
+  .login-foot { text-align:center; font-size:10px; color:var(--muted); margin-top:22px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<div class="login-card">
+  <div class="login-brand">
+    <img src="/static/logo.png" alt="MF"
+         onerror="this.outerHTML='<div class=\'logo-fallback\'>MF</div>'">
+    <div>
+      <div class="login-brand-name">MON FREIGHT</div>
+      <div class="login-brand-tag">Air Cargo · Australia → Mongolia</div>
+    </div>
+  </div>
+
+  <div class="login-error" id="errBox"></div>
+  <div class="login-info" id="infoBox"></div>
+  <div class="dev-banner" id="devBanner">
+    ⚠ SMS provider not configured — your verification code is:
+    <b id="devCode"></b>
+  </div>
+
+  <!-- STEP 1 : password -->
+  <form id="stepPass" autocomplete="on">
+    <h1>Sign in</h1>
+    <p class="login-sub">Enter your account credentials to continue.</p>
+    <div class="login-field">
+      <label for="username">USERNAME</label>
+      <input id="username" name="username" autocomplete="username" required autofocus>
+    </div>
+    <div class="login-field">
+      <label for="password">PASSWORD</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+    </div>
+    <button class="login-btn" id="btnLogin" type="submit">Continue</button>
+  </form>
+
+  <!-- STEP 1.5 : choose mobile (accounts with several registered numbers) -->
+  <div id="stepPhone" class="hidden">
+    <h1>Choose your mobile</h1>
+    <p class="login-sub">This account has several registered numbers.
+       Where should we send the 6-digit code?</p>
+    <div id="phoneChoices"></div>
+    <div class="login-links" style="justify-content:flex-end;">
+      <a href="#" id="backLink2">← Back</a>
+    </div>
+  </div>
+
+  <!-- STEP 2 : SMS code -->
+  <form id="stepCode" class="hidden" autocomplete="off">
+    <h1>Verify your identity</h1>
+    <p class="login-sub" id="codeSub">A 6-digit code was sent to your mobile.</p>
+    <div class="login-field">
+      <label for="codeInput">VERIFICATION CODE</label>
+      <input id="codeInput" inputmode="numeric" pattern="\d{6}" maxlength="6"
+             placeholder="••••••" required>
+    </div>
+    <button class="login-btn" id="btnVerify" type="submit">Verify &amp; Sign in</button>
+    <div class="login-links">
+      <a href="#" id="resendLink" class="disabled">Resend code</a>
+      <a href="#" id="backLink">← Back</a>
+    </div>
+  </form>
+
+  <div class="login-foot">"MON FREIGHT" PTY LTD — Authorised users only</div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const err = $("#errBox"), info = $("#infoBox"), dev = $("#devBanner");
+let resendTimer = null;
+
+function showErr(msg)  { err.textContent = msg; err.style.display = msg ? "block" : "none"; }
+function showInfo(msg) { info.textContent = msg; info.style.display = msg ? "block" : "none"; }
+
+function startResendCountdown(sec) {
+  const link = $("#resendLink");
+  clearInterval(resendTimer);
+  let left = sec;
+  link.classList.add("disabled");
+  link.textContent = `Resend code (${left}s)`;
+  resendTimer = setInterval(() => {
+    left--;
+    if (left <= 0) {
+      clearInterval(resendTimer);
+      link.classList.remove("disabled");
+      link.textContent = "Resend code";
+    } else link.textContent = `Resend code (${left}s)`;
+  }, 1000);
+}
+
+function toPhoneChoice(data) {
+  showErr("");
+  $("#stepPass").classList.add("hidden");
+  $("#stepCode").classList.add("hidden");
+  $("#stepPhone").classList.remove("hidden");
+  $("#phoneChoices").innerHTML = data.choose_phone.map((hint, i) =>
+    `<button type="button" class="login-btn" style="margin-bottom:10px;"
+             data-idx="${i}">📱 ${hint}</button>`).join("");
+  $("#phoneChoices").querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Sending…";
+      try {
+        const d = await post("/auth/send", { phone_index: +btn.dataset.idx });
+        $("#stepPhone").classList.add("hidden");
+        toStep2(d);
+      } catch (ex) { showErr(ex.message); btn.disabled = false; }
+    });
+  });
+}
+
+function toStep2(data) {
+  showErr("");
+  $("#stepPass").classList.add("hidden");
+  $("#stepPhone").classList.add("hidden");
+  $("#stepCode").classList.remove("hidden");
+  $("#codeSub").textContent =
+    `A 6-digit code was sent to ${data.phone_hint}. It expires in ${Math.round(data.expires_in/60)} minutes.`;
+  if (data.dev_code) { $("#devCode").textContent = data.dev_code; dev.style.display = "block"; }
+  else dev.style.display = "none";
+  startResendCountdown(data.resend_in || 60);
+  $("#codeInput").value = "";
+  $("#codeInput").focus();
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : "{}",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Request failed.");
+  return data;
+}
+
+$("#stepPass").addEventListener("submit", async e => {
+  e.preventDefault();
+  showErr(""); showInfo("");
+  const btn = $("#btnLogin");
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const data = await post("/auth/login", {
+      username: $("#username").value.trim(),
+      password: $("#password").value,
+    });
+    if (data.choose_phone) toPhoneChoice(data);
+    else toStep2(data);
+  } catch (ex) { showErr(ex.message); }
+  btn.disabled = false; btn.textContent = "Continue";
+});
+
+$("#stepCode").addEventListener("submit", async e => {
+  e.preventDefault();
+  showErr("");
+  const btn = $("#btnVerify");
+  btn.disabled = true; btn.textContent = "Verifying…";
+  try {
+    const data = await post("/auth/verify", { code: $("#codeInput").value.trim() });
+    window.location.href = data.redirect || "/";
+    return;
+  } catch (ex) { showErr(ex.message); }
+  btn.disabled = false; btn.textContent = "Verify & Sign in";
+});
+
+$("#resendLink").addEventListener("click", async e => {
+  e.preventDefault();
+  if (e.target.classList.contains("disabled")) return;
+  showErr("");
+  try {
+    const data = await post("/auth/resend");
+    showInfo("A new code was sent.");
+    toStep2(data);
+  } catch (ex) { showErr(ex.message); }
+});
+
+function backToStart(e) {
+  e.preventDefault();
+  clearInterval(resendTimer);
+  $("#stepCode").classList.add("hidden");
+  $("#stepPhone").classList.add("hidden");
+  $("#stepPass").classList.remove("hidden");
+  showErr(""); showInfo(""); dev.style.display = "none";
+}
+$("#backLink").addEventListener("click", backToStart);
+$("#backLink2").addEventListener("click", backToStart);
+
+// auto-submit when 6 digits typed
+$("#codeInput").addEventListener("input", e => {
+  e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6);
+  if (e.target.value.length === 6)
+    $("#stepCode").dispatchEvent(new Event("submit", { cancelable: true }));
+});
+</script>
+</body>
+</html>

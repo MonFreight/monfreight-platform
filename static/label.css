@@ -1,0 +1,400 @@
+/* ----------------------------------------------------------------------
+   Mon Freight CP72/CN23 customs label.
+   Print layout matches the supplied reference PDFs:
+     · A4 LANDSCAPE
+     · Uniform 5 mm margin on all 4 sides (so printer doesn't auto-scale)
+     · Two labels side-by-side in the 287 mm × 200 mm printable area
+     · Each label is exactly half of the printable width = 143.5 mm
+     · Single label: left half only, never centred
+   Only the page-level rules below were changed; section internals are
+   untouched.
+   ---------------------------------------------------------------------- */
+@page { size: A4 landscape; margin: 5mm; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: Arial, "Helvetica Neue", sans-serif;
+  color: #000;
+  font-size: 9.5px;
+  line-height: 1.22;
+  background: #d8dde3;
+}
+
+/* ----------- on-screen action bar (hidden when printing) ----------- */
+.actions { text-align: center; padding: 10px; }
+.big-btn {
+  padding: 8px 18px; font-size: 14px;
+  background: #1a505b; color: #fff; border: 0; border-radius: 5px;
+  cursor: pointer; margin: 0 4px;
+}
+.big-btn.ghost { background: #fff; color: #1a505b; border: 1px solid #1a505b; }
+.big-btn:hover { opacity: .9; }
+
+/* ----------- Page wrapper for 2-up landscape printing -----------
+   Printable area on A4 landscape with 5mm margin = 287mm × 200mm.
+   We lay two label sheets side-by-side, each 143.5mm × 200mm, summing
+   to exactly 287mm — perfect 1:1 print, no scaling, no centering. */
+.sheets { padding: 12px 0; }
+.page {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: flex-start;   /* never centre — labels start at left */
+  align-items: flex-start;
+  width: 287mm;                  /* matches printable area at margin:5mm */
+  margin: 0 auto 12px;
+  page-break-after: always;
+  break-after: page;
+  background: transparent;
+  font-size: 0;                  /* kill inline-block whitespace */
+}
+.page:last-child { page-break-after: auto; break-after: auto; }
+
+.sheet {
+  /* Natural block flow — every section flows top-down at its content size,
+     with no flexbox quirks. The label is exactly as tall as its content
+     (much shorter than the full A4 landscape height) and the whole sheet
+     stays glued together on a single page via page-break-inside: avoid. */
+  display: block;
+  width: 143.5mm;                /* exactly half of printable width */
+  /* No fixed height: tables can't flex-grow inside a flex container, so
+     a fixed sheet height would just push the BOX banner past the page
+     edge. We constrain to the printable height as a safety max. */
+  max-height: 200mm;
+  margin: 0;
+  padding: 3mm 4mm;
+  background: #fff;
+  border: 1px dashed #999;       /* preview only — removed in print  */
+  page-break-inside: avoid;
+  break-inside: avoid;
+  overflow: hidden;
+  /* Reset font-size: .page sets font-size:0 to eliminate inline-block
+     whitespace gaps. Without this reset, all .sec-items td cells (which
+     have no explicit font-size) inherit 0 and their text becomes invisible
+     in multi-label view. Single-label view is unaffected because label.html
+     never wraps .sheet inside .page. */
+  font-size: 9.5px;
+}
+
+/* Single label: occupies ONLY the LEFT half of the printable area.
+   The right half stays intentionally blank. `single-left` is the
+   historical class name applied by templates/label.html. */
+body.single .page,
+body.single-left .page { justify-content: flex-start; }
+body.single .sheet,
+body.single-left .sheet { margin: 0; }
+
+@media print {
+  body { background: #fff; }
+  .actions { display: none !important; }
+  .sheets { padding: 0; }
+
+  /* @page already sets size + margin:5mm; .page just needs to fill
+     the printable area without any centering offset. */
+  .page {
+    margin: 0 !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+
+  .sheet {
+    border: 0 !important;
+    margin: 0 !important;
+    /* Width is exactly half of A4 landscape's printable area for a 1:1
+       print. Height is left to natural content so all 8 sections stay
+       on the same page. In the print dialog, set Scale = 100% (Actual
+       size) and turn off "Fit to page" / "Centre on page". */
+    width: 143.5mm !important;
+    max-height: 200mm !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  /* Single label: only the left .sheet renders; right half stays blank */
+  body.single .sheet,
+  body.single-left .sheet { margin: 0 !important; }
+}
+
+/* =========== Shared grid =========== */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  flex: 0 0 auto;          /* natural size by default */
+}
+.grid td, .grid th {
+  border: 1px solid #000;
+  padding: 2.5px 4px;
+  vertical-align: top;
+  line-height: 1.22;
+  /* Allow long values (addresses, descriptions) to wrap inside the cell
+     instead of pushing the whole row taller or hiding text. */
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.grid th { font-weight: 600; background: #fff; }
+.en, .mn { font-size: 7.5px; color: #555; font-weight: 400; display: inline-block; }
+.ll { font-size: 8px; color: #444; font-weight: 600; }
+.val { font-weight: 500; font-size: 10.5px; }
+/* Sender / receiver name — the most important fields on the label.
+   Bumped up so they're easy to read at a glance and fill the FROM/TO band. */
+.val-bold { font-weight: 700 !important; font-size: 15px; line-height: 1.2; }
+.cb {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border: 1px solid #000;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+.cb.checked {
+  background: #fff;
+  position: relative;
+}
+.cb.checked::after {
+  content: "✓";
+  position: absolute;
+  font-size: 8px;
+  font-weight: 700;
+  color: #000;
+  top: -3px; left: 0px;
+  width: 8px; text-align: center;
+}
+.c { text-align: center; }
+
+/* =========== 1. Header band =========== */
+.sec-header td {
+  padding: 4px 6px;
+  vertical-align: top;
+  height: 30px;
+}
+.sec-header .c-brand {
+  font-weight: 700;
+  vertical-align: middle;
+}
+.sec-header .brand-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sec-header .lbl-logo {
+  height: 28px;
+  width: auto;
+  max-height: 28px;
+  max-width: 80px;
+  display: block;
+  object-fit: contain;
+  flex: none;
+}
+.sec-header .brand-text {
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: .2px;
+}
+.sec-header .logo-fallback {
+  font-weight: 700; font-size: 11px; line-height: 1.2;
+}
+.sec-header .c-green-mf { text-align: left; }
+.sec-header .green-tag {
+  font-weight: 700;
+  font-size: 11px;
+}
+.sec-header .mf-num {
+  font-family: "Arial Black", Arial, sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: .5px;
+  margin-top: 2px;
+  border-bottom: 1.5px solid #000;
+  padding-bottom: 2px;
+  display: inline-block;
+}
+.sec-header .c-decl {
+  text-align: center;
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.sec-header .c-decl .cp {
+  font-size: 9px; color: #555;
+}
+
+/* =========== 2. FROM / TO =========== */
+.sec-fromto { border-top: none; margin-top: -1px; }
+.sec-fromto .head td { padding: 3px 5px; height: 18px; }
+.sec-fromto .head strong { font-size: 10px; letter-spacing: 1px; }
+.sec-fromto td { padding: 5px 6px; height: 30px; }
+/* Name row gets extra height so the big bold name doesn't get clipped */
+.sec-fromto tr:nth-child(2) td { height: 34px; }
+/* Address row also bigger so wrapped addresses fit nicely */
+.sec-fromto tr:nth-child(3) td { height: 30px; }
+.sec-fromto .ptc-row td { padding: 0; }
+.sec-fromto .ptc {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.sec-fromto .ptc th, .sec-fromto .ptc td {
+  border: 1px solid #000;
+  padding: 2px 4px;
+  font-size: 8px;
+  font-weight: 400;
+  color: #555;
+  height: 14px;
+}
+.sec-fromto .ptc th:first-child { border-left: 0; }
+.sec-fromto .ptc th:last-child, .sec-fromto .ptc td:last-child { border-right: 0; }
+.sec-fromto .ptc tr:first-child th { border-top: 0; }
+.sec-fromto .ptc tr:last-child td {
+  border-bottom: 0;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: #000;
+  height: 18px;
+  /* Phone numbers and country codes should not wrap onto a new line */
+  white-space: nowrap;
+}
+.sec-fromto .ptc th { width: 33.33%; }
+/* Telephone column slightly wider so phone numbers fit without wrapping */
+.sec-fromto .ptc th:nth-child(3),
+.sec-fromto .ptc td:nth-child(3) { width: 40%; }
+.sec-fromto .ptc th:nth-child(2),
+.sec-fromto .ptc td:nth-child(2) { width: 26%; }
+.sec-fromto .ptc th:nth-child(1),
+.sec-fromto .ptc td:nth-child(1) { width: 34%; }
+
+/* =========== 3. Items =========== */
+.sec-items { border-top: none; margin-top: -1px; }
+.sec-items .head th {
+  font-weight: 600;
+  text-align: left;
+  padding: 3px 5px;
+  font-size: 8.5px;
+  height: 22px;
+}
+.sec-items td { padding: 4px 5px; height: 36px; }
+.sec-items .seq { font-weight: 600; }
+.sec-items .cur { font-size: 8px; color: #555; }
+
+/* =========== 4. Item type / Handling / Totals =========== */
+.sec-options { border-top: none; margin-top: -1px; }
+.sec-options td { padding: 4px 5px; vertical-align: top; height: 100px; }
+.sec-options .opt-h {
+  font-weight: 700; font-size: 8px;
+  margin-bottom: 4px; line-height: 1.2;
+}
+.sec-options .ck {
+  font-size: 8px;
+  margin-bottom: 4px;
+  line-height: 1.22;
+}
+.sec-options .sdr {
+  font-size: 8px; margin-top: 6px; line-height: 1.22;
+}
+.sec-options .totals-cell { padding: 0; }
+.sec-options .kv2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid #000;
+  padding: 4px 6px;
+  font-size: 8px;
+  line-height: 1.22;
+  gap: 4px;
+}
+.sec-options .kv2 strong { font-size: 9.5px; white-space: nowrap; }
+.sec-options .hour {
+  padding: 4px 6px;
+  font-size: 8px;
+}
+
+/* =========== 5. Insurance =========== */
+.sec-insurance { border-top: none; margin-top: -1px; }
+.sec-insurance td { padding: 3px 5px; height: 32px; font-size: 8px; }
+.sec-insurance .ins-check { font-weight: 600; }
+
+/* =========== 6. Instructions / Returns / Stamp ============= */
+.sec-instr {
+  border-top: none;
+  margin-top: -1px;
+}
+.sec-instr td { padding: 4px 5px; vertical-align: top; height: 60px; }
+.sec-instr .inst-text { font-size: 7.5px; line-height: 1.25; }
+.sec-instr .inst-text .en { font-size: 7.5px; color: #000; display: block; margin-bottom: 2px; }
+.sec-instr .inst-text .mn { font-size: 7.5px; color: #000; display: block; }
+
+.sec-instr .returns .ck {
+  font-size: 8px;
+  margin-bottom: 3px;
+  line-height: 1.22;
+}
+.sec-instr .returns .ck.inline {
+  display: inline-block;
+  margin-right: 8px;
+  margin-bottom: 0;
+}
+.sec-instr .returns .addr-line {
+  font-size: 7.5px; color: #555;
+  margin: 2px 0 0 14px;
+}
+.sec-instr .returns .dir-row { margin-top: 4px; }
+
+.sec-instr .stamp-bc {
+  text-align: center;
+  vertical-align: top;
+}
+.sec-instr .stamp-bc .stamp-label {
+  font-size: 8px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  text-align: center;
+}
+.sec-instr .stamp-bc .barcode-svg {
+  display: block;
+  margin: 4px auto 0;
+  width: 100%;
+  max-width: 100%;
+  height: 32px;
+}
+.sec-instr .stamp-bc .bc-text {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  margin-top: 2px;
+  letter-spacing: .5px;
+  border: 1px solid #000;
+  padding: 2px 4px;
+  display: inline-block;
+}
+
+/* =========== 7. Date / Treat / Signature =========== */
+.sec-date { border-top: none; margin-top: -1px; }
+.sec-date td { padding: 3px 5px; height: 38px; }
+.sec-date .lbl {
+  font-size: 8px; color: #555;
+  display: block;
+}
+.sec-date .big-date {
+  font-size: 11px; font-weight: 700; text-align: center;
+  margin-top: 2px;
+}
+.sec-date .abandon { font-size: 8px; }
+.sec-date .sig .lbl { text-align: right; }
+
+/* =========== 8. BOX banner ===========
+   Compact band at the bottom of the label. Sits right after the date
+   row in natural block flow. */
+.box-banner {
+  margin-top: -1px;
+  border: 2px solid #000;
+  padding: 12px 0 10px;
+  text-align: center;
+  font-weight: 900;
+  font-size: 32px;
+  letter-spacing: 5px;
+  font-family: "Arial Black", Arial, sans-serif;
+  background: #fff;
+  line-height: 1.1;
+}

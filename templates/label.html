@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Label — {{ s.mf_number }}</title>
+<link rel="stylesheet" href="/static/label.css">
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+</head>
+<body class="single single-left">
+<div class="actions">
+  <button onclick="window.print()" class="big-btn">Print this label</button>
+  <button onclick="window.close()" class="big-btn ghost">Close</button>
+</div>
+
+{% include "label_body.html" %}
+
+<script>
+function renderBarcodes() {
+  if (!window.JsBarcode) return;
+  document.querySelectorAll(".barcode-svg").forEach(el => {
+    try {
+      JsBarcode(el, el.dataset.mf, {
+        format: "CODE128", width: 1.4, height: 28,
+        displayValue: false, margin: 0,
+      });
+    } catch (e) { console.warn("barcode failed:", e); }
+  });
+}
+window.addEventListener("load", () => {
+  renderBarcodes();
+  {% if auto_print %}
+  setTimeout(() => window.print(), 350);
+  {% endif %}
+});
+</script>
+</body>
+</html>

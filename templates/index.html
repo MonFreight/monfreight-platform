@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mon Freight — Logistics Management</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/themes/airbnb.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+</head>
+<body>
+
+<!-- ================================================================
+     TOP BAR
+     ================================================================ -->
+<header class="topbar">
+  <div class="brand">
+    <img src="/static/logo.png" class="logo-img" alt="Mon Freight"
+         onerror="this.outerHTML='<div class=\'logo-fallback\'>MF</div>'">
+    <div class="brand-text">
+      <div class="brand-name">MON FREIGHT</div>
+      <div class="brand-tag">Air Cargo &nbsp;·&nbsp; Australia → Mongolia</div>
+    </div>
+  </div>
+
+  <nav class="topnav" id="mainNav">
+    <a href="#" data-panel="dashboard" class="active">Dashboard</a>
+    <a href="#" data-panel="shipments">Shipments</a>
+    <a href="#" data-panel="customers">Customers</a>
+    <a href="#" data-panel="labels">Labels &amp; Print</a>
+    <a href="#" data-panel="reports">Reports</a>
+    <a href="#" data-panel="settings">Settings</a>
+  </nav>
+
+  <div class="topbar-actions">
+    <button class="btn ghost light" id="importBtn">⬆ Import .xlsx</button>
+    <span id="userChip" style="color:#9ecdd8;font-size:12px;font-weight:600;"></span>
+    <button class="btn ghost light" id="logoutBtn" title="Sign out">Logout</button>
+  </div>
+</header>
+
+<input type="file" id="importFile" accept=".xlsx,.xlsm" hidden>
+
+<main>
+
+<!-- ================================================================
+     PANEL: DASHBOARD
+     ================================================================ -->
+<section class="panel active" id="panel-dashboard">
+
+  <!-- KPI cards -->
+  <div class="kpi-grid" id="kpiGrid">
+    <div class="kpi accent">
+      <div class="kpi-value" id="kpiShipments">—</div>
+      <div class="kpi-label">Shipments This Month</div>
+      <div class="kpi-sub" id="kpiMonthLabel"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value" id="kpiWeight">—</div>
+      <div class="kpi-label">Total Weight (kg)</div>
+      <div class="kpi-sub">This month</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value" id="kpiRevenue">—</div>
+      <div class="kpi-label">Revenue (AU$)</div>
+      <div class="kpi-sub">This month</div>
+    </div>
+    <div class="kpi paid">
+      <div class="kpi-value" id="kpiPaid">—</div>
+      <div class="kpi-label">Paid</div>
+      <div class="kpi-sub" id="kpiPaidCount"></div>
+    </div>
+    <div class="kpi unpaid">
+      <div class="kpi-value" id="kpiUnpaid">—</div>
+      <div class="kpi-label">Outstanding</div>
+      <div class="kpi-sub" id="kpiUnpaidCount"></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value" id="kpiAllTime">—</div>
+      <div class="kpi-label">All-Time Shipments</div>
+      <div class="kpi-sub" id="kpiAllTimeRev"></div>
+    </div>
+  </div>
+
+  <!-- Batch history + quick actions -->
+  <div class="dashboard-grid">
+    <div class="card">
+      <div class="card-header">
+        <h2>Recent Batches</h2>
+        <button class="btn small ghost" id="dashRefreshBtn">Refresh</button>
+      </div>
+      <div id="dashBatches">
+        <table class="dash-batch-table">
+          <thead>
+            <tr>
+              <th>Batch Date</th>
+              <th class="num">Boxes</th>
+              <th class="num">Weight (kg)</th>
+              <th class="num">Revenue AU$</th>
+              <th class="num">Paid</th>
+              <th class="num">Unpaid</th>
+            </tr>
+          </thead>
+          <tbody id="dashBatchRows">
+            <tr><td colspan="6" class="muted small" style="padding:14px;text-align:center;">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Quick Actions</h2>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px;">
+        <button class="btn primary" onclick="switchPanel('shipments')">➕ Add New Shipment</button>
+        <button class="btn" onclick="switchPanel('labels')">🏷 Print / Export Labels</button>
+        <button class="btn" onclick="switchPanel('reports')">📊 View Reports</button>
+        <button class="btn" onclick="switchPanel('customers')">👤 Customer Lookup</button>
+        <button class="btn ghost" id="importBtn2">⬆ Import Air Cargo .xlsx</button>
+      </div>
+
+      <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--line);">
+        <h2 style="font-size:13px;margin:0 0 10px;">System Status</h2>
+        <div id="healthStatus" class="muted small">Checking…</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     PANEL: SHIPMENTS
+     ================================================================ -->
+<section class="panel" id="panel-shipments">
+
+  <!-- Search -->
+  <div class="card" style="padding:10px 14px;">
+    <form id="searchForm" class="searchbar" method="get" action="/">
+      <input type="search" name="q" value="{{ search_q }}"
+             placeholder="Search sender / receiver name, phone, MF number, or batch date (YYYY-MM-DD)">
+      <button class="btn primary" type="submit">Search</button>
+      {% if search_q %}<a class="btn ghost" href="/">✕ Clear</a>{% endif %}
+    </form>
+  </div>
+
+  <!-- Filter / Export bar -->
+  <div class="filterbar">
+    <div class="filterbar-left">
+      <label>From <input type="text" id="filterStart" value="{{ start_d or '' }}" placeholder="Date"></label>
+      <label>To   <input type="text" id="filterEnd"   value="{{ end_d or '' }}"   placeholder="Date"></label>
+      <button id="filterApply" class="btn">Apply</button>
+      <button id="filterClear" class="btn ghost">Clear</button>
+    </div>
+    <div class="filterbar-right">
+      <label>Export batch:
+        <input type="text" id="exportDate" placeholder="Pick a date"
+               value="{{ start_d if (start_d and start_d == end_d) else (all_dates[0] if all_dates else '') }}">
+      </label>
+      <a class="btn" id="aircargoBtn">Air Cargo .xlsx</a>
+      <a class="btn" id="labelsXlsxBtn">Labels .xlsx</a>
+      <a class="btn" id="labelsAllBtn" target="_blank">Print All Labels</a>
+      <button class="btn primary" id="printSelectedBtn" disabled>Print Selected (0)</button>
+      <button class="btn"         id="excelSelectedBtn" disabled>Excel Selected (0)</button>
+      <button class="btn danger"  id="deleteSelectedBtn" disabled>Delete Selected (0)</button>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-num" id="statBoxes">0</div>
+      <div class="stat-label">Boxes Shown</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statWeight">0</div>
+      <div class="stat-label">Weight (kg)</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statValue">$0</div>
+      <div class="stat-label">Declared Value</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statPrice">$0</div>
+      <div class="stat-label">Freight Charge (AU$)</div>
+    </div>
+    <div class="stat paid">
+      <div class="stat-num" id="statPaid">$0</div>
+      <div class="stat-label">Paid (AU$)</div>
+    </div>
+    <div class="stat unpaid">
+      <div class="stat-num" id="statUnpaid">$0</div>
+      <div class="stat-label">Outstanding (AU$)</div>
+    </div>
+  </div>
+
+  <!-- New shipment entry form -->
+  <section class="card entry">
+    <div class="entry-title">
+      <h2>New Shipment</h2>
+      <span class="muted small">
+        Tab → next field &nbsp;·&nbsp; Enter → save &nbsp;·&nbsp;
+        Price accepts formulas: <code>=weight*5</code> &nbsp;·&nbsp;
+        Total = Weight × Price + Extra &nbsp;·&nbsp;
+        Type 3+ chars to auto-fill from saved customers
+      </span>
+    </div>
+    <form id="newForm" autocomplete="off">
+      <div class="rowscroll">
+        <table class="entryTable">
+          <thead>
+            <tr>
+              <th>Batch Date</th>
+              <th>Box #</th>
+              <th colspan="6" class="grp from">FROM (Хэнээс)</th>
+              <th colspan="5" class="grp to">TO (Хэнд)</th>
+              <th colspan="6" class="grp cargo">CARGO (Ачаа)</th>
+              <th>Paid</th>
+              <th>Delivery Note</th>
+              <th></th>
+            </tr>
+            <tr class="sub">
+              <th class="col-date"></th>
+              <th class="col-num">Box # (auto)</th>
+              <th class="col-name">Full Name</th>
+              <th class="col-phone">Phone</th>
+              <th class="col-addr">Address</th>
+              <th class="col-city">City</th>
+              <th class="col-country">Country</th>
+              <th class="col-postal">Postcode</th>
+              <th class="col-name">Full Name</th>
+              <th class="col-phone">Phone</th>
+              <th class="col-addr">Address</th>
+              <th class="col-city">City</th>
+              <th class="col-country">Country</th>
+              <th class="col-desc">Description</th>
+              <th class="col-num">Value (AU$)</th>
+              <th class="col-num">Weight (kg)</th>
+              <th class="col-money">Rate (AU$/kg)</th>
+              <th class="col-num">Extra (AU$)</th>
+              <th class="col-money">Total (AU$)</th>
+              <th class="col-paid"></th>
+              <th class="col-note"></th>
+              <th class="col-action"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="col-date">
+                <input type="text" name="batch_date" value="{{ default_date }}" required class="batch-input">
+              </td>
+              <td class="col-num">
+                <input name="box_number" type="number" min="1" step="1" placeholder="auto"
+                       title="Leave blank to auto-assign the next available box number">
+              </td>
+              <td class="col-name autocomplete-cell">
+                <input name="sender_name" required placeholder="Sender name" data-lookup="sender" data-lookup-field="name">
+              </td>
+              <td class="col-phone autocomplete-cell">
+                <input name="sender_phone" placeholder="+61 4xx xxx xxx" data-lookup="sender" data-lookup-field="phone">
+              </td>
+              <td class="col-addr">
+                <input name="sender_address" placeholder="Street address">
+              </td>
+              <td class="col-city">
+                <input name="sender_city" placeholder="City">
+              </td>
+              <td class="col-country">
+                <input name="sender_country" value="Австрали">
+              </td>
+              <td class="col-postal">
+                <input name="sender_postal" placeholder="0000">
+              </td>
+              <td class="col-name autocomplete-cell">
+                <input name="receiver_name" required placeholder="Receiver name" data-lookup="receiver" data-lookup-field="name">
+              </td>
+              <td class="col-phone autocomplete-cell">
+                <input name="receiver_phone" placeholder="9900 xxxx" data-lookup="receiver" data-lookup-field="phone">
+              </td>
+              <td class="col-addr">
+                <input name="receiver_address" placeholder="Street / district">
+              </td>
+              <td class="col-city">
+                <input name="receiver_city" placeholder="UB / Дархан">
+              </td>
+              <td class="col-country">
+                <input name="receiver_country" value="Монгол">
+              </td>
+              <td class="col-desc">
+                <input name="description" placeholder="e.g. Clothing, Shoes">
+              </td>
+              <td class="col-num">
+                <input name="declared_value" type="number" step="0.01" value="0" min="0">
+              </td>
+              <td class="col-num">
+                <input name="weight" type="number" step="0.01" value="0" min="0">
+              </td>
+              <td class="col-money">
+                <input name="price_input" placeholder="e.g. 7 or =weight*7">
+              </td>
+              <td class="col-num">
+                <input name="extra_charges" type="number" step="0.01" value="0" placeholder="0" min="0">
+              </td>
+              <td class="col-money">
+                <input name="total_display" placeholder="auto" readonly class="readonly-cell">
+              </td>
+              <td class="col-paid paidcol">
+                <label class="toggle">
+                  <input type="checkbox" name="paid">
+                  <span>Paid</span>
+                </label>
+              </td>
+              <td class="col-note">
+                <input name="delivery_note" placeholder="PPBOX / Delivery">
+              </td>
+              <td class="col-action">
+                <button type="submit" class="btn primary">Add</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </section>
+
+  <!-- Batch Date quick-filter (directly above Shipment Records) -->
+  <div class="batch-filter-bar">
+    <span class="batch-filter-label">📋 Batch Date Filter</span>
+    <input type="text" id="batchFilterDate"
+           placeholder="All batches"
+           value="{{ start_d if (start_d and start_d == end_d) else '' }}"
+           autocomplete="off" readonly>
+    {% if start_d and start_d == end_d %}
+    <span class="batch-filter-active">Showing batch <strong>{{ start_d }}</strong></span>
+    <a class="btn ghost small" href="/?">✕ Show All</a>
+    {% else %}
+    <span class="muted small">Select a date to filter to a specific batch</span>
+    {% endif %}
+    <div class="batch-filter-dates">
+      {% for d in all_dates %}
+      <a class="batch-date-chip {% if start_d == d %}active{% endif %}"
+         href="/?start={{ d }}&end={{ d }}">{{ d }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Shipments table -->
+  <section class="card" id="shipments">
+    <div class="card-header">
+      <h2>Shipment Records <span class="muted small" id="rowCount"></span></h2>
+    </div>
+    <div class="rowscroll">
+      <table class="dataTable" id="shipTable">
+        <thead>
+          <tr>
+            <th class="cb-col"><input type="checkbox" id="selectAll" title="Select all visible"></th>
+            <th data-sort="batch_date"    class="sortable">Batch Date</th>
+            <th data-sort="box_number"   class="sortable">Box</th>
+            <th data-sort="mf_number"    class="sortable">MF Number</th>
+            <th data-sort="sender_name"  class="sortable">Sender</th>
+            <th data-sort="receiver_name" class="sortable">Receiver</th>
+            <th>Description</th>
+            <th data-sort="declared_value" class="sortable num">Value (AU$)</th>
+            <th data-sort="weight"        class="sortable num">Wt (kg)</th>
+            <th data-sort="price_aud"     class="sortable num">Rate AU$/kg</th>
+            <th data-sort="extra_charges" class="sortable num">Extra</th>
+            <th data-sort="total_aud"     class="sortable num">Total AU$</th>
+            <th data-sort="paid"          class="sortable">Status</th>
+            <th style="text-align:right">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="empty hidden" id="emptyMsg">No shipments match your current filters.</p>
+
+    {% if pages > 1 %}
+    <nav class="pager">
+      <span class="muted small">Page {{ page }} of {{ pages }} &nbsp;·&nbsp; {{ total_count }} shipment{{ "" if total_count == 1 else "s" }} total</span>
+      <div class="pager-links">
+        {% set qs = '' %}
+        {% if search_q %}{% set qs = qs + 'q=' + search_q + '&' %}{% endif %}
+        {% if start_d %}{% set qs = qs + 'start=' + start_d + '&' %}{% endif %}
+        {% if end_d   %}{% set qs = qs + 'end='   + end_d   + '&' %}{% endif %}
+        {% if page > 1 %}
+          <a class="btn small" href="?{{ qs }}page={{ page - 1 }}">‹ Prev</a>
+        {% endif %}
+        {% for p in range(1, pages + 1) %}
+          {% if p == page %}
+            <span class="btn small primary">{{ p }}</span>
+          {% elif p <= 3 or p > pages - 3 or (p >= page - 1 and p <= page + 1) %}
+            <a class="btn small" href="?{{ qs }}page={{ p }}">{{ p }}</a>
+          {% elif p == 4 and page > 5 %}
+            <span class="muted">…</span>
+          {% elif p == pages - 3 and page < pages - 4 %}
+            <span class="muted">…</span>
+          {% endif %}
+        {% endfor %}
+        {% if page < pages %}
+          <a class="btn small" href="?{{ qs }}page={{ page + 1 }}">Next ›</a>
+        {% endif %}
+      </div>
+    </nav>
+    {% else %}
+    <p class="muted small" style="text-align:right;margin:8px 0 0;">
+      {{ total_count }} shipment{{ "" if total_count == 1 else "s" }} total
+    </p>
+    {% endif %}
+  </section>
+</section>
+
+<!-- ================================================================
+     PANEL: CUSTOMERS
+     ================================================================ -->
+<section class="panel" id="panel-customers">
+  <div class="card">
+    <div class="card-header">
+      <h2>Customer Directory</h2>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div class="customers-search-bar" style="margin:0;">
+          <input type="search" id="customerSearch" placeholder="Search by name, phone or city…" style="min-width:260px;">
+        </div>
+        <button class="btn small" id="customerRefresh">Refresh</button>
+      </div>
+    </div>
+    <p class="muted small" style="margin:0 0 12px;">
+      All unique senders and receivers extracted from shipment records, ordered by most recent activity.
+    </p>
+    <div class="rowscroll">
+      <table class="dataTable" id="customerTable" style="table-layout:auto;">
+        <thead>
+          <tr>
+            <th style="width:80px;">Role</th>
+            <th>Name</th>
+            <th style="width:130px;">Phone</th>
+            <th style="width:130px;">City</th>
+            <th>Address</th>
+            <th style="width:110px;">Last Shipment</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="6" class="muted small" style="padding:16px;text-align:center;">Loading customers…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small" id="customerCount" style="text-align:right;margin:8px 0 0;"></p>
+  </div>
+</section>
+
+<!-- ================================================================
+     PANEL: LABELS & PRINT
+     ================================================================ -->
+<section class="panel" id="panel-labels">
+  <div class="card">
+    <h2>Label &amp; Document Export</h2>
+    <p class="muted small" style="margin:-4px 0 16px;">
+      Generate shipping labels and air cargo manifests for a batch, or for individually selected shipments.
+    </p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+      <!-- Batch export -->
+      <div style="border:1px solid var(--line);border-radius:var(--radius);padding:16px;">
+        <h3 style="margin:0 0 10px;font-size:13px;color:var(--brand);">Batch Export</h3>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px;">
+          Select batch date:
+        </label>
+        <input type="text" id="labelBatchDate" class="batch-input"
+               placeholder="Pick a date"
+               value="{{ all_dates[0] if all_dates else '' }}"
+               style="width:100%;padding:8px 10px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;margin-bottom:12px;">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <a class="btn primary" id="labelAircargoBtn">📄 Air Cargo Manifest (.xlsx)</a>
+          <a class="btn"         id="labelLabelsXlsxBtn">🏷 Shipping Labels (.xlsx)</a>
+          <a class="btn"         id="labelPrintAllBtn" target="_blank">🖨 Print All Labels (HTML)</a>
+        </div>
+      </div>
+
+      <!-- Selected shipments -->
+      <div style="border:1px solid var(--line);border-radius:var(--radius);padding:16px;">
+        <h3 style="margin:0 0 10px;font-size:13px;color:var(--brand);">Selected Shipments</h3>
+        <p class="muted small" style="margin:0 0 12px;">
+          Select shipments from the Shipments table, then use these buttons.
+          Up to 150 labels per Excel export.
+        </p>
+        <div id="labelSelectionInfo" class="muted small" style="margin-bottom:12px;">
+          No shipments selected. Go to the Shipments tab to select some.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="btn" id="labelPrintSelectedBtn" disabled>🖨 Print Selected Labels</button>
+          <button class="btn" id="labelExcelSelectedBtn" disabled>📥 Download Selected Labels (.xlsx)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Format chooser explanation -->
+  <div class="card" style="background:var(--brand-pale);">
+    <h2 style="font-size:13px;">Label Format Guide</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px;">
+      <div>
+        <strong style="font-size:12px;">System-Generated HTML Label</strong>
+        <p class="muted small" style="margin:4px 0 0;">
+          Opens directly in your browser for immediate printing. A4 portrait format (sender on top, receiver below). Best for quick single-label prints.
+        </p>
+      </div>
+      <div>
+        <strong style="font-size:12px;">Excel Template Label (.xlsx)</strong>
+        <p class="muted small" style="margin:4px 0 0;">
+          Uses the official Mon Freight label template. Preserves exact borders, fonts and layout. Supports up to 150 labels per export. Best for batch printing.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     PANEL: REPORTS
+     ================================================================ -->
+<section class="panel" id="panel-reports">
+  <div class="card">
+    <div class="card-header">
+      <h2>Batch Reports</h2>
+      <div class="report-filters" style="margin:0;">
+        <label>From <input type="text" id="reportStart" placeholder="Date" class="batch-input"></label>
+        <label>To   <input type="text" id="reportEnd"   placeholder="Date" class="batch-input"></label>
+        <button class="btn primary small" id="reportApply">Generate</button>
+        <button class="btn ghost small"   id="reportClear">All Time</button>
+      </div>
+    </div>
+
+    <!-- Summary KPIs -->
+    <div class="report-summary-grid" id="reportSummaryGrid">
+      <div class="report-kpi">
+        <div class="rk-value" id="rptBatches">—</div>
+        <div class="rk-label">Batches</div>
+      </div>
+      <div class="report-kpi">
+        <div class="rk-value" id="rptShipments">—</div>
+        <div class="rk-label">Shipments</div>
+      </div>
+      <div class="report-kpi">
+        <div class="rk-value" id="rptWeight">—</div>
+        <div class="rk-label">Total Weight (kg)</div>
+      </div>
+      <div class="report-kpi">
+        <div class="rk-value" id="rptRevenue">—</div>
+        <div class="rk-label">Total Revenue (AU$)</div>
+      </div>
+    </div>
+
+    <!-- Batch breakdown table -->
+    <div class="rowscroll">
+      <table class="report-table" id="reportTable">
+        <thead>
+          <tr>
+            <th>Batch Date</th>
+            <th class="num">Shipments</th>
+            <th class="num">Weight (kg)</th>
+            <th class="num">Declared Value</th>
+            <th class="num">Revenue (AU$)</th>
+            <th class="num">Paid (AU$)</th>
+            <th class="num">Outstanding (AU$)</th>
+            <th class="num">Paid / Total</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="reportTableBody">
+          <tr><td colspan="9" class="muted" style="padding:16px;text-align:center;">
+            Click "Generate" to load report data.
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small" id="reportFooter" style="text-align:right;margin:8px 0 0;"></p>
+  </div>
+</section>
+
+<!-- ================================================================
+     PANEL: SETTINGS
+     ================================================================ -->
+<section class="panel" id="panel-settings">
+
+  <!-- ====== SECURITY & USERS (admin only) ====== -->
+  <div class="card hidden" id="usersCard">
+    <h2>Security &amp; Users</h2>
+    <div class="settings-section">
+      <h3>User Accounts</h3>
+      <p class="muted small" style="margin:0 0 10px;">
+        Every user signs in with a password plus a 6-digit SMS code sent to
+        their registered mobile (E.164 format, e.g. <code>+61400123456</code>).
+        An account may have several numbers (comma-separated) — the person
+        logging in picks which one receives the code.
+        <span id="smsModeBadge"></span>
+      </p>
+      <table class="report-table" id="usersTable">
+        <thead><tr><th>Username</th><th>Mobile</th><th>Role</th><th>Status</th>
+                   <th>Last login</th><th style="width:220px;">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:flex-end;">
+        <div><label class="small muted">Username</label><br>
+          <input id="nuUsername" style="width:130px;"></div>
+        <div><label class="small muted">Password (min 8)</label><br>
+          <input id="nuPassword" type="password" style="width:140px;"></div>
+        <div><label class="small muted">Mobile (+…)</label><br>
+          <input id="nuPhone" placeholder="+61400123456" style="width:140px;"></div>
+        <div><label class="small muted">Role</label><br>
+          <select id="nuRole"><option value="staff">staff</option>
+                              <option value="admin">admin</option></select></div>
+        <button class="btn primary" id="addUserBtn">+ Add User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== BACKUP & RESTORE (admin only) ====== -->
+  <div class="card hidden" id="backupCard">
+    <h2>Backup &amp; Restore</h2>
+    <div class="settings-section">
+      <h3>Automatic Daily Backup</h3>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Schedule</strong>
+          <span>Database + uploaded files, zipped with integrity checksums</span>
+        </div>
+        <span class="settings-badge" id="backupSchedule">…</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Cloud Storage</strong>
+          <span>Off-site copy of every backup</span>
+        </div>
+        <span class="settings-badge" id="backupDrive">…</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Last Backup</strong>
+          <span>Most recent successful backup</span>
+        </div>
+        <span class="settings-badge" id="backupLast">…</span>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn primary" id="runBackupBtn">Run Backup Now</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>Backup History (last 30 days)</h3>
+      <table class="report-table" id="backupsTable">
+        <thead><tr><th>Backup</th><th>Date (UTC)</th><th>Size</th>
+                   <th>Stored</th><th style="width:190px;">Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted small" style="margin:8px 0 0;">
+        Restoring replaces ALL current data with the selected backup.
+        A safety snapshot of the current state is taken automatically first.
+      </p>
+    </div>
+  </div>
+
+  <!-- restore confirmation modal -->
+  <div id="restoreModal" style="display:none;position:fixed;inset:0;z-index:1000;
+       background:rgba(15,23,42,.55);align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:12px;padding:26px 28px;max-width:430px;
+                width:92%;box-shadow:0 18px 50px rgba(0,0,0,.4);">
+      <h2 style="margin:0 0 6px;color:var(--danger);">⚠ Confirm Restore</h2>
+      <p style="font-size:13px;color:var(--ink-soft);margin:0 0 8px;">
+        You are about to restore the system from:</p>
+      <p style="font-size:13px;font-weight:700;margin:0 0 12px;" id="restoreModalName"></p>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 18px;">
+        All current shipments, users and files will be <b>replaced</b> with the
+        contents of this backup. A safety snapshot of the current state is taken
+        first, so this action can be undone by restoring that snapshot.</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn" id="restoreCancelBtn">Cancel</button>
+        <button class="btn danger" id="restoreConfirmBtn">Yes, Restore Now</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Application Settings</h2>
+
+    <div class="settings-section">
+      <h3>Company Information</h3>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Company Name</strong>
+          <span>Displayed in exports and labels</span>
+        </div>
+        <span class="settings-badge">"MON FREIGHT" PTY LTD</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Route</strong>
+          <span>Primary shipping route</span>
+        </div>
+        <span class="settings-badge">Australia → Mongolia (Air Cargo)</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Default Sender Country</strong>
+          <span>Pre-filled on new shipment forms</span>
+        </div>
+        <span class="settings-badge">Австрали (Australia)</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Default Receiver Country</strong>
+          <span>Pre-filled on new shipment forms</span>
+        </div>
+        <span class="settings-badge">Монгол (Mongolia)</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>MF Numbering</h3>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Number Format</strong>
+          <span>Unique shipment identifier scheme</span>
+        </div>
+        <span class="settings-badge">MF + YYMMDD + 3-digit box (e.g. MF260109001)</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Auto-Assignment</strong>
+          <span>Box number behaviour when left blank</span>
+        </div>
+        <span class="settings-badge">Next available for batch date</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Export &amp; Label Limits</h3>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Maximum Labels per .xlsx Export</strong>
+          <span>Template auto-extends using page cloning</span>
+        </div>
+        <span class="settings-badge">150 labels</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Air Cargo Manifest</strong>
+          <span>Excel layout — unlimited rows</span>
+        </div>
+        <span class="settings-badge">Unlimited</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Database &amp; Performance</h3>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Database</strong>
+          <span>Storage backend</span>
+        </div>
+        <span class="settings-badge" id="settingsDbKind">…</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Total Shipments Stored</strong>
+          <span>Live count from database</span>
+        </div>
+        <span class="settings-badge" id="settingsShipCount">…</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>Page Size</strong>
+          <span>Shipments per page in the table</span>
+        </div>
+        <span class="settings-badge">{{ page_size }} per page</span>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <strong>System Health</strong>
+          <span>Database connectivity check</span>
+        </div>
+        <span class="settings-badge" id="settingsHealth">…</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Formula Reference</h3>
+      <p class="muted small" style="margin:0 0 10px;">
+        The Price field accepts plain numbers or formula expressions using these variables:
+      </p>
+      <table class="report-table" style="max-width:500px;">
+        <thead><tr><th>Variable</th><th>Alias</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>weight</code></td><td><code>w</code></td><td>Shipment weight in kg</td></tr>
+          <tr><td><code>value</code></td><td><code>v</code></td><td>Declared value (AU$)</td></tr>
+        </tbody>
+      </table>
+      <p class="muted small" style="margin:8px 0 0;">
+        Examples: &nbsp; <code>=weight*7</code> &nbsp; <code>=w*5 + 10</code> &nbsp;
+        <code>=weight*6 + value*0.02</code>
+      </p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ================================================================
+     EDIT MODAL
+     ================================================================ -->
+<div class="modal hidden" id="editModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>Edit Shipment — <span class="muted" id="editTitle"></span></h3>
+      <button class="modal-close" id="editClose">&times;</button>
+    </div>
+    <form id="editForm" class="modal-body">
+      <input type="hidden" name="id">
+      <div class="modal-grid">
+        <label>Batch Date<input type="text" name="batch_date" required class="batch-input"></label>
+        <label>Box #<input type="number" name="box_number" min="1" step="1" placeholder="auto"></label>
+        <label>
+          Payment Status
+          <label class="toggle inline"><input type="checkbox" name="paid"><span>Paid</span></label>
+        </label>
+
+        <fieldset class="span3">
+          <legend>FROM — Sender</legend>
+          <label>Full Name<input name="sender_name"></label>
+          <label>Phone<input name="sender_phone"></label>
+          <label>Address<input name="sender_address"></label>
+          <label>City<input name="sender_city"></label>
+          <label>Country<input name="sender_country"></label>
+          <label>Postcode<input name="sender_postal"></label>
+        </fieldset>
+
+        <fieldset class="span3">
+          <legend>TO — Receiver</legend>
+          <label>Full Name<input name="receiver_name"></label>
+          <label>Phone<input name="receiver_phone"></label>
+          <label>Address<input name="receiver_address"></label>
+          <label>City<input name="receiver_city"></label>
+          <label>Country<input name="receiver_country"></label>
+        </fieldset>
+
+        <fieldset class="span3">
+          <legend>Cargo Details</legend>
+          <label class="span3">Description<input name="description"></label>
+          <label>Declared Value (AU$)<input name="declared_value" type="number" step="0.01" min="0"></label>
+          <label>Weight (kg)<input name="weight" type="number" step="0.01" min="0"></label>
+          <label>
+            Freight Rate (AU$/kg or formula)
+            <input name="price_input">
+            <span class="hint" id="editPricePreview"></span>
+          </label>
+          <label>Extra Charges (AU$)<input name="extra_charges" type="number" step="0.01" min="0"></label>
+          <label>
+            Total (AU$) — auto-calculated
+            <input name="total_display" readonly class="readonly-cell">
+          </label>
+          <label class="span3">Delivery Note<input name="delivery_note"></label>
+          <label class="span3">Internal Notes<input name="notes"></label>
+        </fieldset>
+      </div>
+    </form>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="editCancel">Cancel</button>
+      <button type="submit" form="editForm" class="btn primary">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     CONFIRM DIALOG
+     ================================================================ -->
+<div class="modal hidden" id="confirmModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3 id="confirmTitle">Confirm</h3>
+    </div>
+    <div class="modal-body">
+      <p id="confirmMessage" style="margin:0;">Are you sure?</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="confirmCancel">Cancel</button>
+      <button type="button" class="btn danger" id="confirmOk">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     IMPORT MODAL
+     ================================================================ -->
+<div class="modal hidden" id="importModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3>Import Air Cargo Excel</h3>
+      <button class="modal-close" id="importClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted small" style="margin-top:0;">
+        Select the batch date first, then choose the .xlsx file to import.
+        Every BOX row in the file will be added under the date you select.
+      </p>
+
+      <div class="import-step">
+        <div class="import-step-head"><span class="step-num">1</span> Batch Date for These Shipments</div>
+        <input type="text" id="importDate" class="batch-input" placeholder="Pick a date" autocomplete="off">
+      </div>
+
+      <div class="import-step">
+        <div class="import-step-head"><span class="step-num">2</span> Choose Air Cargo Excel File</div>
+        <button type="button" class="btn" id="importPickFileBtn" disabled>Choose .xlsx file…</button>
+        <p id="importFilename" class="muted small" style="margin:6px 0 0;">No file selected</p>
+      </div>
+
+      <div class="import-summary hidden" id="importSummary">
+        <div class="import-summary-row">
+          <span class="muted">Batch date:</span>
+          <strong id="importSummaryDate">—</strong>
+        </div>
+        <div class="import-summary-row">
+          <span class="muted">File:</span>
+          <strong id="importSummaryFile">—</strong>
+        </div>
+        <p class="muted small" style="margin:6px 0 0;">
+          MF numbers will be assigned as
+          <strong>MF<span id="importMfPreview">YYMMDD</span>001, 002…</strong>
+        </p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="importCancel">Cancel</button>
+      <button type="button" class="btn primary" id="importGo" disabled>Import Shipments</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     AUTOFILL CONFIRMATION MODAL
+     ================================================================ -->
+<div class="modal hidden" id="autofillModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3>Autofill from Saved Customer?</h3>
+      <button class="modal-close" id="autofillClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="autofillPreview"></div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="autofillCancel">Cancel</button>
+      <button type="button" class="btn primary" id="autofillOk">Yes, Autofill</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     PRINT TEMPLATE CHOOSER MODAL
+     ================================================================ -->
+<div class="modal hidden" id="printChooserModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3>Choose Label Format</h3>
+      <button class="modal-close" id="printChooserClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted small" style="margin-top:0;">
+        Which format should be used for <strong id="printChooserScope">this label</strong>?
+      </p>
+      <div class="print-chooser-grid">
+        <button type="button" class="btn primary chooser-btn" data-choice="html">
+          <strong>System-Generated HTML</strong>
+          <span class="small">Opens in browser &amp; prints automatically — A4 portrait (sender top, receiver bottom)</span>
+        </button>
+        <button type="button" class="btn chooser-btn" data-choice="xlsx">
+          <strong>Excel Template Label</strong>
+          <span class="small">Uses the official Mon Freight template — renders in browser and prints directly (supports up to 150 labels)</span>
+        </button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="printChooserCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     TOAST
+     ================================================================ -->
+<div id="toast"></div>
+
+<script>
+  window.SHIPMENTS     = {{ shipments | tojson | safe }};
+  window.TODAY         = "{{ today }}";
+  window.ALL_DATES     = {{ all_dates | tojson | safe }};
+  window.PAGE          = {{ page }};
+  window.PAGES         = {{ pages }};
+  window.SEARCH_Q      = {{ search_q | tojson | safe }};
+  window.FILTER_START  = {{ start_d | tojson | safe }};
+  window.FILTER_END    = {{ end_d   | tojson | safe }};
+</script>
+<script src="/static/app.js"></script>
+</body>
+</html>

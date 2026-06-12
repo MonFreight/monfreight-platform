@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>All labels</title>
+<link rel="stylesheet" href="/static/label.css">
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+</head>
+<body class="{% if labels|length == 1 %}single-left{% endif %}">
+<div class="actions">
+  <button class="big-btn" onclick="window.print()">Print {{ "label" if labels|length == 1 else "all labels" }}</button>
+  <button class="big-btn ghost" onclick="window.close()">Close</button>
+  <span style="margin-left:14px;color:#555;font-size:12px;">{{ labels|length }} label{{ "" if labels|length == 1 else "s" }} · A4 landscape · 2 per page</span>
+</div>
+
+<div class="sheets">
+  {% for ctx in labels %}
+    {# Use {% set %} per-iteration so the loop-scoped variables definitely
+       propagate to the included label_body.html — bulletproof against any
+       weirdness {% with %} might have with {% include %} in Jinja2. #}
+    {% set s = ctx.s %}
+    {% set description_clean = ctx.description_clean %}
+    {% set receiver_full_address = ctx.receiver_full_address %}
+    {% set batch_date_str = ctx.batch_date_str %}
+    {% if loop.index0 % 2 == 0 %}<div class="page">{% endif %}
+      {% include "label_body.html" %}
+    {% if loop.index % 2 == 0 or loop.last %}</div>{% endif %}
+  {% endfor %}
+</div>
+
+<script>
+function renderBarcodes() {
+  if (!window.JsBarcode) return;
+  document.querySelectorAll(".barcode-svg").forEach(el => {
+    try {
+      JsBarcode(el, el.dataset.mf, {
+        format: "CODE128", width: 1.4, height: 28,
+        displayValue: false, margin: 0,
+      });
+    } catch (e) { console.warn("barcode failed:", e); }
+  });
+}
+window.addEventListener("load", () => {
+  renderBarcodes();
+  {% if auto_print %}
+  setTimeout(() => window.print(), 600);
+  {% endif %}
+});
+</script>
+</body>
+</html>
