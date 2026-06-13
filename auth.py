@@ -599,36 +599,69 @@ def delete_user(user_id: int, request: Request):
 # middleware + init
 # --------------------------------------------------------------------------
 def _bootstrap_admin(engine) -> None:
+    """Create the initial admin account on first run only.
+
+    Rules
+    -----
+    * If the admin user already exists **and** ADMIN_RESET is not set →
+      return immediately.  The stored password is never touched, so any
+      password changed through the Settings page survives redeployments.
+    * If ADMIN_RESET=1 is in the environment → overwrite the password
+      from ADMIN_PASSWORD (or generate a new one).  Remove ADMIN_RESET
+      from the environment after use.
+    * If no admin user exists yet → create one.  Use ADMIN_PASSWORD if
+      set, otherwise generate a random password and log it once.
+    """
     username = os.environ.get("ADMIN_USERNAME", "admin").strip().lower()
     force_reset = os.environ.get("ADMIN_RESET", "") in ("1", "true")
+
     with Session(engine) as s:
-        has_users = s.scalar(select(User).limit(1)) is not None
-        if has_users and not force_reset:
-            return
-        password = os.environ.get("ADMIN_PASSWORD", "")
-        generated = False
-        if not password:
-            password = secrets.token_urlsafe(9)
-            generated = True
+        # Check for THIS specific admin user, not just any user.
+        # This is the key guard: if the account already exists we leave
+        # it completely alone (password, phone, everything) unless the
+        # operator has explicitly requested a reset via ADMIN_RESET=1.
         u = s.scalar(select(User).where(User.username == username))
-        if u:
+
+        if u is not None and not force_reset:
+            return  # account exists, nothing to do — preserve stored password
+
+        password = os.environ.get("ADMIN_PASSWORD", "")
+        generated = not bool(password)
+        if generated:
+            password = secrets.token_urlsafe(9)
+
+        if u is not None:
+            # force_reset path — operator explicitly requested a reset
             u.password_hash = hash_password(password)
             u.phone = os.environ.get("ADMIN_PHONE", u.phone or "").strip()
             u.role, u.active = "admin", True
-        else:
-            s.add(User(username=username, password_hash=hash_password(password),
-                       phone=os.environ.get("ADMIN_PHONE", "").strip(), role="admin"))
+            s.commit()
+            log.warning(
+                "ADMIN_RESET applied — account '%s' password updated from "
+                "environment variables.  Remove the ADMIN_RESET env var now.",
+                username,
+            )
+            return
+
+        # First-run path — no admin account exists yet
+        s.add(User(
+            username=username,
+            password_hash=hash_password(password),
+            phone=os.environ.get("ADMIN_PHONE", "").strip(),
+            role="admin",
+        ))
         s.commit()
-        if has_users:
-            log.warning("ADMIN_RESET applied — account '%s' reset from environment "
-                        "variables. Remove the ADMIN_RESET variable now.", username)
+
     banner = "=" * 62
-    log.warning("\n%s\n  FIRST RUN — default admin account created\n"
-                "  username : %s\n  password : %s%s\n"
-                "  Change this password from Settings after first login.\n%s",
-                banner, username,
-                password if generated else "(from ADMIN_PASSWORD env var)",
-                "  <-- write this down!" if generated else "", banner)
+    log.warning(
+        "\n%s\n  FIRST RUN — default admin account created\n"
+        "  username : %s\n  password : %s%s\n"
+        "  Change this password from Settings after first login.\n%s",
+        banner, username,
+        password if generated else "(from ADMIN_PASSWORD env var)",
+        "  <-- write this down!" if generated else "",
+        banner,
+    )
 
 
 def init_auth(app, engine, templates) -> None:

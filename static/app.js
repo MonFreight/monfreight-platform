@@ -478,7 +478,7 @@ function _applyUnlinkLocally(ids) {
   });
 }
 
-function renderEditLinkSection() {
+async function renderEditLinkSection() {
   const chipsDiv = $("#editLinkedChips");
   const select   = $("#editLinkSelect");
   if (!chipsDiv || !select) return;
@@ -490,8 +490,22 @@ function renderEditLinkSection() {
 
   // ── chips: current linked boxes ───────────────────────────────────────
   chipsDiv.innerHTML = "";
+  // Fetch all boxes for this batch date so chips and dropdown are complete
+  let batchBoxes = [];
+  try {
+    const res = await fetch(`/api/shipments?start=${ship.batch_date}&end=${ship.batch_date}`);
+    if (res.ok) batchBoxes = await res.json();
+  } catch { batchBoxes = shipments.filter(r => r.batch_date === ship.batch_date); }
+
+  // Merge API data into local shipments for link_group accuracy
+  batchBoxes.forEach(remote => {
+    const local = shipments.find(r => r.id === remote.id);
+    if (local) Object.assign(local, remote);
+  });
+  _buildLgMap(shipments);
+
   const linked = ship.link_group != null
-    ? shipments.filter(r => r.link_group === ship.link_group && r.id !== ship.id)
+    ? batchBoxes.filter(r => r.link_group === ship.link_group && r.id !== ship.id)
     : [];
 
   if (linked.length === 0) {
@@ -510,19 +524,19 @@ function renderEditLinkSection() {
       });
   }
 
-  // ── dropdown: available boxes to add ─────────────────────────────────
+  // ── dropdown: same-batch boxes not already linked ─────────────────────
   const linkedIds = ship.link_group != null
-    ? new Set(shipments.filter(r => r.link_group === ship.link_group).map(r => r.id))
+    ? new Set(batchBoxes.filter(r => r.link_group === ship.link_group).map(r => r.id))
     : new Set([ship.id]);
 
   select.innerHTML = '<option value="">— select a box to link with —</option>';
-  shipments
+  batchBoxes
     .filter(r => !linkedIds.has(r.id))
-    .sort((a, b) => b.batch_date.localeCompare(a.batch_date) || a.box_number - b.box_number)
+    .sort((a, b) => a.box_number - b.box_number)
     .forEach(r => {
       const opt = document.createElement("option");
       opt.value = r.id;
-      opt.textContent = `BOX ${r.box_number}  ·  ${r.batch_date}  ·  ${r.receiver_name || "—"}`;
+      opt.textContent = `BOX ${r.box_number}  ·  ${r.receiver_name || "—"}`;
       select.appendChild(opt);
     });
 }
@@ -545,8 +559,10 @@ document.addEventListener("click", async e => {
 
 // Add link from edit modal
 $("#editLinkAddBtn")?.addEventListener("click", async () => {
-  const targetId = +$("#editLinkSelect").value;
+  const sel = $("#editLinkSelect");
+  const targetId = +sel.value;
   if (!targetId) { toast("Please select a box to link with.", "err"); return; }
+  const targetLabel = sel.options[sel.selectedIndex]?.text || `ID ${targetId}`;
   const res = await fetch("/api/shipments/link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -557,29 +573,41 @@ $("#editLinkAddBtn")?.addEventListener("click", async () => {
   _applyLinkLocally([_editingShipId, targetId], data.link_group);
   renderEditLinkSection();
   renderTable();
-  const tgt = shipments.find(r => r.id === targetId);
-  toast(`Linked with BOX ${tgt?.box_number}.`);
+  toast(`Linked with ${targetLabel}.`);
 });
 
 // ── Post-create link modal ────────────────────────────────────────────────
 let _justCreatedId = null;
 
-function _populateLinkAfterCreate(createdShip) {
+async function _populateLinkAfterCreate(createdShip) {
   _justCreatedId = createdShip.id;
   const msg    = $("#linkAfterCreateMsg");
   const select = $("#linkAfterCreateSelect");
   if (!msg || !select) return;
-  msg.textContent = `BOX ${createdShip.box_number} saved. Would you like to link it with another box belonging to the same receiver?`;
+  msg.textContent = `BOX ${createdShip.box_number} saved. Would you like to link it with another box from the same batch (${createdShip.batch_date})?`;
+
+  // Fetch all boxes for this batch date
+  let batchBoxes = [];
+  try {
+    const res = await fetch(`/api/shipments?start=${createdShip.batch_date}&end=${createdShip.batch_date}`);
+    if (res.ok) batchBoxes = await res.json();
+  } catch { batchBoxes = shipments.filter(r => r.batch_date === createdShip.batch_date); }
+
   select.innerHTML = '<option value="">— select a box —</option>';
-  shipments
+  batchBoxes
     .filter(r => r.id !== createdShip.id)
-    .sort((a, b) => b.batch_date.localeCompare(a.batch_date) || a.box_number - b.box_number)
+    .sort((a, b) => a.box_number - b.box_number)
     .forEach(r => {
       const opt = document.createElement("option");
       opt.value = r.id;
-      opt.textContent = `BOX ${r.box_number}  ·  ${r.batch_date}  ·  ${r.receiver_name || "—"}`;
+      opt.textContent = `BOX ${r.box_number}  ·  ${r.receiver_name || "—"}`;
       select.appendChild(opt);
     });
+
+  if (batchBoxes.filter(r => r.id !== createdShip.id).length === 0) {
+    // No other boxes in this batch — skip the modal
+    return;
+  }
   $("#linkAfterCreateModal").classList.remove("hidden");
 }
 
@@ -593,8 +621,10 @@ function _closeLinkAfterCreate() {
 );
 
 $("#linkAfterCreateConfirm")?.addEventListener("click", async () => {
-  const targetId = +$("#linkAfterCreateSelect").value;
+  const sel = $("#linkAfterCreateSelect");
+  const targetId = +sel.value;
   if (!targetId) { toast("Please select a box to link with.", "err"); return; }
+  const targetLabel = sel.options[sel.selectedIndex]?.text || `ID ${targetId}`;
   const res = await fetch("/api/shipments/link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -604,9 +634,8 @@ $("#linkAfterCreateConfirm")?.addEventListener("click", async () => {
   const data = await res.json();
   _applyLinkLocally([_justCreatedId, targetId], data.link_group);
   renderTable();
-  const tgt = shipments.find(r => r.id === targetId);
   const src = shipments.find(r => r.id === _justCreatedId);
-  toast(`BOX ${src?.box_number} linked with BOX ${tgt?.box_number}.`);
+  toast(`BOX ${src?.box_number} linked with ${targetLabel}.`);
   _closeLinkAfterCreate();
 });
 
