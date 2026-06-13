@@ -160,8 +160,6 @@
       <a class="btn" id="labelsAllBtn" target="_blank">Print All Labels</a>
       <button class="btn primary" id="printSelectedBtn" disabled>Print Selected (0)</button>
       <button class="btn"         id="excelSelectedBtn" disabled>Excel Selected (0)</button>
-      <button class="btn"         id="linkBoxesBtn"    disabled title="Link selected boxes so they share a colour">🔗 Link Boxes</button>
-      <button class="btn ghost"   id="unlinkBoxesBtn"  disabled title="Remove selected boxes from their link group">Unlink</button>
       <button class="btn danger"  id="deleteSelectedBtn" disabled>Delete Selected (0)</button>
     </div>
   </div>
@@ -863,11 +861,48 @@
           <label class="span3">Delivery Note<input name="delivery_note"></label>
           <label class="span3">Internal Notes<input name="notes"></label>
         </fieldset>
+
+        <fieldset class="span3" id="editLinkSection">
+          <legend>🔗 Linked Boxes</legend>
+          <p class="muted small" style="margin:0 0 8px;">
+            Linked boxes share a colour so staff can quickly identify boxes belonging to the same receiver.
+          </p>
+          <div id="editLinkedChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:26px;margin-bottom:10px;"></div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="editLinkSelect" style="flex:1;padding:6px 8px;border:1.5px solid var(--line);border-radius:var(--radius);font-size:12px;color:var(--text);">
+              <option value="">— select a box to link with —</option>
+            </select>
+            <button type="button" id="editLinkAddBtn" class="btn small primary">+ Add Link</button>
+          </div>
+        </fieldset>
       </div>
     </form>
     <div class="modal-actions">
       <button type="button" class="btn ghost" id="editCancel">Cancel</button>
       <button type="submit" form="editForm" class="btn primary">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     POST-CREATE LINK MODAL
+     ================================================================ -->
+<div class="modal hidden" id="linkAfterCreateModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3>Link to Another Box?</h3>
+      <button class="modal-close" id="linkAfterCreateClose">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;">
+      <p id="linkAfterCreateMsg" style="margin:0 0 14px;font-size:13px;"></p>
+      <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Select box to link with:</label>
+      <select id="linkAfterCreateSelect" style="width:100%;padding:7px 10px;border:1.5px solid var(--line);border-radius:var(--radius);font-size:13px;color:var(--text);">
+        <option value="">— select a box —</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="linkAfterCreateSkip">Skip</button>
+      <button type="button" class="btn primary" id="linkAfterCreateConfirm">Link Box</button>
     </div>
   </div>
 </div>

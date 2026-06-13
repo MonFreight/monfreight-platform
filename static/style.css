@@ -595,6 +595,31 @@ main {
 .dataTable tbody tr.selected.lg7,
 .dataTable tbody tr.selected.lg8 { background: var(--brand-soft); }
 
+/* Linked-box chip (used in edit modal) */
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid;
+  white-space: nowrap;
+}
+.link-chip-remove {
+  cursor: pointer;
+  opacity: 0.55;
+  font-size: 15px;
+  line-height: 1;
+  background: none;
+  border: none;
+  padding: 0 0 0 2px;
+  color: inherit;
+  font-family: inherit;
+}
+.link-chip-remove:hover { opacity: 1; }
+
 /* Link icon badge next to box number */
 .link-badge {
   display: inline-flex;

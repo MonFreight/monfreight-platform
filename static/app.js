@@ -359,17 +359,6 @@ function updateSelectionUI() {
     b.textContent = `${label} (${n})`;
   });
 
-  // Link / Unlink buttons
-  const linkBtn   = $("#linkBoxesBtn");
-  const unlinkBtn = $("#unlinkBoxesBtn");
-  if (linkBtn)   linkBtn.disabled   = n < 2;
-  if (unlinkBtn) {
-    const anyLinked = [...selectedIds].some(id => {
-      const s = shipments.find(r => r.id === id);
-      return s && s.link_group != null;
-    });
-    unlinkBtn.disabled = !anyLinked;
-  }
 
   // Labels panel buttons
   const lpsb = $("#labelPrintSelectedBtn");
@@ -462,77 +451,163 @@ $("#deleteSelectedBtn")?.addEventListener("click", async () => {
   toast("Selected shipments deleted.");
 });
 
-// ── Link Boxes ────────────────────────────────────────────────────────────
-$("#linkBoxesBtn")?.addEventListener("click", async () => {
-  if (selectedIds.size < 2) return;
-  const ids = Array.from(selectedIds);
-  const boxLabels = ids.map(id => {
-    const s = shipments.find(r => r.id === id);
-    return s ? `BOX ${s.box_number}` : `#${id}`;
-  }).join(", ");
-  const ok = await customConfirm({
-    title: "Link Boxes",
-    message: `Link ${ids.length} boxes together so they share a colour?\n\n${boxLabels}`,
-    okLabel: "Link",
-  });
-  if (!ok) return;
-  const res = await fetch("/api/shipments/link", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  if (!res.ok) { toast("Link failed — " + (await safeJson(res))?.detail, "err"); return; }
-  const data = await res.json();
-  // Collect old group ids that were merged into the new group
-  const mergedGroups = new Set(ids.map(id => {
-    const s = shipments.find(r => r.id === id);
-    return s ? s.link_group : null;
-  }).filter(g => g != null));
-  // Update all members of merged groups AND the selected ids
-  shipments.forEach(r => {
-    if (ids.includes(r.id) || mergedGroups.has(r.link_group)) {
-      r.link_group = data.link_group;
-    }
-  });
-  renderTable();
-  toast(`${data.count} boxes linked.`);
-});
+// ── Edit modal: linked boxes section ─────────────────────────────────────
+let _editingShipId = null;
 
-// ── Unlink Boxes ──────────────────────────────────────────────────────────
-$("#unlinkBoxesBtn")?.addEventListener("click", async () => {
-  const ids = Array.from(selectedIds).filter(id => {
-    const s = shipments.find(r => r.id === id);
-    return s && s.link_group != null;
+function _applyLinkLocally(ids, newGroup) {
+  // ids: selected ids, newGroup: returned link_group from server
+  // Also update any pre-existing group members that got merged
+  const mergedGroups = new Set(
+    ids.map(id => shipments.find(r => r.id === id)?.link_group).filter(g => g != null)
+  );
+  shipments.forEach(r => {
+    if (ids.includes(r.id) || mergedGroups.has(r.link_group)) r.link_group = newGroup;
   });
-  if (!ids.length) return;
-  const ok = await customConfirm({
-    title: "Unlink Boxes",
-    message: `Remove ${ids.length} box${ids.length === 1 ? "" : "es"} from their link group?`,
-    okLabel: "Unlink",
-  });
-  if (!ok) return;
-  const res = await fetch("/api/shipments/unlink", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  if (!res.ok) { toast("Unlink failed — " + (await safeJson(res))?.detail, "err"); return; }
-  // Clear link_group locally; lone survivors are also cleared by the server
-  // so refresh group membership for all shipments in the affected groups
-  const affectedGroups = new Set(ids.map(id => {
-    const s = shipments.find(r => r.id === id);
-    return s ? s.link_group : null;
-  }).filter(g => g != null));
+}
+
+function _applyUnlinkLocally(ids) {
+  const affectedGroups = new Set(
+    ids.map(id => shipments.find(r => r.id === id)?.link_group).filter(g => g != null)
+  );
   shipments.forEach(r => {
     if (ids.includes(r.id)) { r.link_group = null; return; }
     if (affectedGroups.has(r.link_group)) {
-      // Check if this survivor is now alone in its group
-      const groupMates = shipments.filter(x => x.link_group === r.link_group && !ids.includes(x.id));
-      if (groupMates.length === 1) r.link_group = null;
+      const mates = shipments.filter(x => x.link_group === r.link_group && !ids.includes(x.id));
+      if (mates.length === 1) r.link_group = null;
     }
   });
+}
+
+function renderEditLinkSection() {
+  const chipsDiv = $("#editLinkedChips");
+  const select   = $("#editLinkSelect");
+  if (!chipsDiv || !select) return;
+
+  const ship = shipments.find(r => r.id === _editingShipId);
+  if (!ship) return;
+
+  _buildLgMap(shipments);  // ensure colour map is current
+
+  // ── chips: current linked boxes ───────────────────────────────────────
+  chipsDiv.innerHTML = "";
+  const linked = ship.link_group != null
+    ? shipments.filter(r => r.link_group === ship.link_group && r.id !== ship.id)
+    : [];
+
+  if (linked.length === 0) {
+    chipsDiv.innerHTML = '<span class="muted small" style="line-height:26px;">No linked boxes yet.</span>';
+  } else {
+    const cls = _lgClassMap[ship.link_group] || "lg1";
+    linked
+      .sort((a, b) => a.box_number - b.box_number)
+      .forEach(r => {
+        const chip = document.createElement("span");
+        chip.className = "link-chip";
+        chip.style.cssText = `background:var(--${cls});color:var(--${cls}b);border-color:var(--${cls}b)`;
+        chip.innerHTML = `🔗 BOX ${r.box_number} · ${r.receiver_name || ""}` +
+          `<button class="link-chip-remove" type="button" data-remove-id="${r.id}" title="Remove this link">×</button>`;
+        chipsDiv.appendChild(chip);
+      });
+  }
+
+  // ── dropdown: available boxes to add ─────────────────────────────────
+  const linkedIds = ship.link_group != null
+    ? new Set(shipments.filter(r => r.link_group === ship.link_group).map(r => r.id))
+    : new Set([ship.id]);
+
+  select.innerHTML = '<option value="">— select a box to link with —</option>';
+  shipments
+    .filter(r => !linkedIds.has(r.id))
+    .sort((a, b) => b.batch_date.localeCompare(a.batch_date) || a.box_number - b.box_number)
+    .forEach(r => {
+      const opt = document.createElement("option");
+      opt.value = r.id;
+      opt.textContent = `BOX ${r.box_number}  ·  ${r.batch_date}  ·  ${r.receiver_name || "—"}`;
+      select.appendChild(opt);
+    });
+}
+
+// Chip remove clicks (delegated)
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".link-chip-remove");
+  if (!btn) return;
+  const removeId = +btn.dataset.removeId;
+  const res = await fetch("/api/shipments/unlink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: [removeId] }),
+  });
+  if (!res.ok) { toast("Unlink failed.", "err"); return; }
+  _applyUnlinkLocally([removeId]);
+  renderEditLinkSection();
   renderTable();
-  toast("Boxes unlinked.");
+});
+
+// Add link from edit modal
+$("#editLinkAddBtn")?.addEventListener("click", async () => {
+  const targetId = +$("#editLinkSelect").value;
+  if (!targetId) { toast("Please select a box to link with.", "err"); return; }
+  const res = await fetch("/api/shipments/link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: [_editingShipId, targetId] }),
+  });
+  if (!res.ok) { toast("Link failed.", "err"); return; }
+  const data = await res.json();
+  _applyLinkLocally([_editingShipId, targetId], data.link_group);
+  renderEditLinkSection();
+  renderTable();
+  const tgt = shipments.find(r => r.id === targetId);
+  toast(`Linked with BOX ${tgt?.box_number}.`);
+});
+
+// ── Post-create link modal ────────────────────────────────────────────────
+let _justCreatedId = null;
+
+function _populateLinkAfterCreate(createdShip) {
+  _justCreatedId = createdShip.id;
+  const msg    = $("#linkAfterCreateMsg");
+  const select = $("#linkAfterCreateSelect");
+  if (!msg || !select) return;
+  msg.textContent = `BOX ${createdShip.box_number} saved. Would you like to link it with another box belonging to the same receiver?`;
+  select.innerHTML = '<option value="">— select a box —</option>';
+  shipments
+    .filter(r => r.id !== createdShip.id)
+    .sort((a, b) => b.batch_date.localeCompare(a.batch_date) || a.box_number - b.box_number)
+    .forEach(r => {
+      const opt = document.createElement("option");
+      opt.value = r.id;
+      opt.textContent = `BOX ${r.box_number}  ·  ${r.batch_date}  ·  ${r.receiver_name || "—"}`;
+      select.appendChild(opt);
+    });
+  $("#linkAfterCreateModal").classList.remove("hidden");
+}
+
+function _closeLinkAfterCreate() {
+  $("#linkAfterCreateModal")?.classList.add("hidden");
+  _justCreatedId = null;
+}
+
+["#linkAfterCreateClose", "#linkAfterCreateSkip"].forEach(sel =>
+  document.querySelector(sel)?.addEventListener("click", _closeLinkAfterCreate)
+);
+
+$("#linkAfterCreateConfirm")?.addEventListener("click", async () => {
+  const targetId = +$("#linkAfterCreateSelect").value;
+  if (!targetId) { toast("Please select a box to link with.", "err"); return; }
+  const res = await fetch("/api/shipments/link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: [_justCreatedId, targetId] }),
+  });
+  if (!res.ok) { toast("Link failed.", "err"); return; }
+  const data = await res.json();
+  _applyLinkLocally([_justCreatedId, targetId], data.link_group);
+  renderTable();
+  const tgt = shipments.find(r => r.id === targetId);
+  const src = shipments.find(r => r.id === _justCreatedId);
+  toast(`BOX ${src?.box_number} linked with BOX ${tgt?.box_number}.`);
+  _closeLinkAfterCreate();
 });
 
 // Labels panel buttons (mirror to shipments-panel actions)
@@ -644,7 +719,9 @@ $("#newForm").addEventListener("submit", async e => {
     e.target.receiver_country.value = "Монгол";
     entryComputeTotal();
     e.target.sender_name.focus();
-    toast(`BOX ${created.box_number} (${created.mf_number}) added successfully.`);
+    toast(`BOX ${created.box_number} (${created.mf_number}) added.`);
+    // Prompt user to link this new box with another
+    _populateLinkAfterCreate(created);
   } catch (err) {
     toast("Submit failed: " + err.message, "err");
   }
@@ -875,6 +952,7 @@ const editModal = $("#editModal");
 const editForm  = $("#editForm");
 
 function openEdit(ship) {
+  _editingShipId = ship.id;
   editForm.id.value = ship.id;
   $("#editTitle").textContent = `BOX ${ship.box_number} · ${ship.mf_number}`;
   for (const [k, v] of Object.entries(ship)) {
@@ -887,6 +965,7 @@ function openEdit(ship) {
   editForm.elements["extra_charges"].value = ship.extra_charges || 0;
   editForm.elements["total_display"].value = (ship.total_aud || 0).toFixed(2);
   updateEditPricePreview();
+  renderEditLinkSection();
   editModal.classList.remove("hidden");
 }
 
