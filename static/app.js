@@ -14,6 +14,18 @@ let shipments = [...(window.SHIPMENTS || [])];
 const _filterStart = window.FILTER_START || "";
 const _filterEnd   = window.FILTER_END   || "";
 
+// ── Link-group colour assignment ──────────────────────────────────────────
+// Maps link_group integer → CSS class name (lg1…lg8, cycling).
+// Rebuilt each time renderTable runs so new groups get colours automatically.
+const _LG_CLASSES = ["lg1","lg2","lg3","lg4","lg5","lg6","lg7","lg8"];
+let _lgClassMap = {};   // link_group int → CSS class string
+
+function _buildLgMap(rows) {
+  const groups = [...new Set(rows.map(r => r.link_group).filter(g => g != null))].sort((a,b) => a-b);
+  _lgClassMap = {};
+  groups.forEach((g, i) => { _lgClassMap[g] = _LG_CLASSES[i % _LG_CLASSES.length]; });
+}
+
 // Default sort matches server-side: batch_date desc, box_number asc secondary.
 // User can override by clicking column headers.
 let sortKey = "batch_date";
@@ -268,15 +280,39 @@ function renderTable() {
   if (rows.length === 0) $("#emptyMsg").classList.remove("hidden");
   else                   $("#emptyMsg").classList.add("hidden");
 
+  // Build link_group → related box numbers map for tooltips
+  _buildLgMap(rows);
+  const _lgBoxLabels = {};  // link_group → "BOX 1, BOX 2, …"
+  for (const r of rows) {
+    if (r.link_group == null) continue;
+    if (!_lgBoxLabels[r.link_group]) _lgBoxLabels[r.link_group] = [];
+    _lgBoxLabels[r.link_group].push(`BOX ${r.box_number}`);
+  }
+
   for (const r of rows) {
     const tr = document.createElement("tr");
     tr.dataset.id = r.id;
-    if (r.paid)            tr.classList.add("paid");
+    if (r.paid) tr.classList.add("paid");
     if (selectedIds.has(r.id)) tr.classList.add("selected");
+    // Apply link-group colour class
+    if (r.link_group != null && _lgClassMap[r.link_group]) {
+      tr.classList.add(_lgClassMap[r.link_group]);
+    }
+
+    // Build link badge for the Box column
+    let linkBadge = "";
+    if (r.link_group != null) {
+      const related = (_lgBoxLabels[r.link_group] || []).join(", ");
+      const cls = _lgClassMap[r.link_group] || "";
+      const borderColor = getComputedStyle(document.documentElement)
+        .getPropertyValue(`--${cls}b`).trim() || "#666";
+      linkBadge = `<span class="link-badge" style="background:var(--${cls});color:var(--${cls}b);border:1px solid var(--${cls}b)" title="Related: ${escapeAttr(related)}"></span>`;
+    }
+
     tr.innerHTML = `
       <td class="cb-col"><input type="checkbox" class="row-cb" ${selectedIds.has(r.id) ? "checked" : ""}></td>
       <td><span class="ed" data-field="batch_date" data-type="date">${r.batch_date}</span></td>
-      <td>BOX ${r.box_number}</td>
+      <td>BOX ${r.box_number}${linkBadge}</td>
       <td class="mf-num">${r.mf_number}</td>
       <td><strong>${escapeHtml(r.sender_name)}</strong>
           <div class="muted small">${escapeHtml(r.sender_phone || "")}</div></td>
@@ -322,6 +358,18 @@ function updateSelectionUI() {
                   id === "excelSelectedBtn" ? "Excel Selected" : "Delete Selected";
     b.textContent = `${label} (${n})`;
   });
+
+  // Link / Unlink buttons
+  const linkBtn   = $("#linkBoxesBtn");
+  const unlinkBtn = $("#unlinkBoxesBtn");
+  if (linkBtn)   linkBtn.disabled   = n < 2;
+  if (unlinkBtn) {
+    const anyLinked = [...selectedIds].some(id => {
+      const s = shipments.find(r => r.id === id);
+      return s && s.link_group != null;
+    });
+    unlinkBtn.disabled = !anyLinked;
+  }
 
   // Labels panel buttons
   const lpsb = $("#labelPrintSelectedBtn");
@@ -412,6 +460,72 @@ $("#deleteSelectedBtn")?.addEventListener("click", async () => {
   selectedIds.clear();
   renderTable();
   toast("Selected shipments deleted.");
+});
+
+// ── Link Boxes ────────────────────────────────────────────────────────────
+$("#linkBoxesBtn")?.addEventListener("click", async () => {
+  if (selectedIds.size < 2) return;
+  const ids = Array.from(selectedIds);
+  const boxLabels = ids.map(id => {
+    const s = shipments.find(r => r.id === id);
+    return s ? `BOX ${s.box_number}` : `#${id}`;
+  }).join(", ");
+  const ok = await customConfirm({
+    title: "Link Boxes",
+    message: `Link ${ids.length} boxes together so they share a colour?\n\n${boxLabels}`,
+    okLabel: "Link",
+  });
+  if (!ok) return;
+  const res = await fetch("/api/shipments/link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) { toast("Link failed — " + (await safeJson(res))?.detail, "err"); return; }
+  const data = await res.json();
+  // Update local shipments with new link_group
+  shipments.forEach(r => {
+    if (ids.includes(r.id)) r.link_group = data.link_group;
+  });
+  renderTable();
+  toast(`${data.count} boxes linked.`);
+});
+
+// ── Unlink Boxes ──────────────────────────────────────────────────────────
+$("#unlinkBoxesBtn")?.addEventListener("click", async () => {
+  const ids = Array.from(selectedIds).filter(id => {
+    const s = shipments.find(r => r.id === id);
+    return s && s.link_group != null;
+  });
+  if (!ids.length) return;
+  const ok = await customConfirm({
+    title: "Unlink Boxes",
+    message: `Remove ${ids.length} box${ids.length === 1 ? "" : "es"} from their link group?`,
+    okLabel: "Unlink",
+  });
+  if (!ok) return;
+  const res = await fetch("/api/shipments/unlink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) { toast("Unlink failed — " + (await safeJson(res))?.detail, "err"); return; }
+  // Clear link_group locally; lone survivors are also cleared by the server
+  // so refresh group membership for all shipments in the affected groups
+  const affectedGroups = new Set(ids.map(id => {
+    const s = shipments.find(r => r.id === id);
+    return s ? s.link_group : null;
+  }).filter(g => g != null));
+  shipments.forEach(r => {
+    if (ids.includes(r.id)) { r.link_group = null; return; }
+    if (affectedGroups.has(r.link_group)) {
+      // Check if this survivor is now alone in its group
+      const groupMates = shipments.filter(x => x.link_group === r.link_group && !ids.includes(x.id));
+      if (groupMates.length === 1) r.link_group = null;
+    }
+  });
+  renderTable();
+  toast("Boxes unlinked.");
 });
 
 // Labels panel buttons (mirror to shipments-panel actions)

@@ -153,6 +153,25 @@ def build_aircargo_xlsx(rows: list[dict], batch_date: dt.date, out) -> None:
         c.border = box
 
     paid_fill = PatternFill("solid", start_color="C6EFCE")  # Excel green
+
+    # Link-group palette — 8 distinct soft colors cycling for each unique group
+    _LINK_PALETTE = [
+        "BDD7EE",  # cornflower blue
+        "F4B8C1",  # rose pink
+        "FFD966",  # amber
+        "C9B1FF",  # lavender
+        "92D050",  # lime (distinct from paid green C6EFCE)
+        "F4A460",  # sandy orange
+        "87CEEB",  # sky blue
+        "DDA0DD",  # plum
+    ]
+    _sorted_groups = sorted({r.get("link_group") for r in rows
+                              if r.get("link_group") is not None})
+    _group_fill = {
+        g: PatternFill("solid", start_color=_LINK_PALETTE[i % len(_LINK_PALETTE)])
+        for i, g in enumerate(_sorted_groups)
+    }
+
     rows = sorted(rows, key=lambda r: r["box_number"])
     for i, r in enumerate(rows):
         excel_row = 6 + i
@@ -178,12 +197,16 @@ def build_aircargo_xlsx(rows: list[dict], batch_date: dt.date, out) -> None:
         ws.cell(row=excel_row, column=20, value=r.get("delivery_note") or "")
         ws.cell(row=excel_row, column=21, value=r.get("notes") or "")
         is_paid = bool(r.get("paid"))
+        lg = r.get("link_group")
+        row_fill = _group_fill.get(lg) if lg is not None else None
+        if row_fill is None and is_paid:
+            row_fill = paid_fill
         for col in range(1, 22):
             cell = ws.cell(row=excel_row, column=col)
             cell.border = box
             cell.alignment = Alignment(wrap_text=True, vertical="center")
-            if is_paid:
-                cell.fill = paid_fill
+            if row_fill:
+                cell.fill = row_fill
 
     widths = [7, 14, 22, 14, 30, 14, 14, 14, 22, 18, 30, 14, 14, 30, 12, 10, 12, 11, 12, 18, 24]
     for i, w in enumerate(widths, 1):

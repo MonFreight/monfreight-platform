@@ -93,6 +93,7 @@ class Shipment(Base):
     paid = Column(Boolean, default=False)
     delivery_note = Column(String, default="")
     notes = Column(String, default="")
+    link_group = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
@@ -111,6 +112,7 @@ def _ensure_columns():
         ("total_aud", "ALTER TABLE shipments ADD COLUMN total_aud FLOAT DEFAULT 0"),
         ("total_override", "ALTER TABLE shipments ADD COLUMN total_override BOOLEAN DEFAULT 0"),
         ("extra_charges", "ALTER TABLE shipments ADD COLUMN extra_charges FLOAT DEFAULT 0"),
+        ("link_group",    "ALTER TABLE shipments ADD COLUMN link_group INTEGER DEFAULT NULL"),
     ]
     with engine.connect() as conn:
         try:
@@ -707,6 +709,66 @@ def bulk_delete_shipments(payload: IdsPayload):
             s.delete(ship)
         s.commit()
     return {"ok": True, "deleted": len(ships)}
+
+
+@app.post("/api/shipments/link")
+def link_shipments(payload: IdsPayload):
+    """Assign selected shipments to the same link group.
+
+    If any selected shipment already belongs to a group, all members of
+    that group are merged into one group (union).  The group id is the
+    minimum shipment id across all members.
+    """
+    if len(payload.ids) < 2:
+        raise HTTPException(400, "Select at least 2 shipments to link.")
+    ids = list({int(i) for i in payload.ids})
+    with Session(engine) as s:
+        ships = list(s.scalars(select(Shipment).where(Shipment.id.in_(ids))).all())
+        if len(ships) < 2:
+            raise HTTPException(404, "One or more shipments not found.")
+        # Collect existing groups to merge
+        existing_groups = {sh.link_group for sh in ships if sh.link_group is not None}
+        if existing_groups:
+            group_members = list(s.scalars(
+                select(Shipment).where(Shipment.link_group.in_(list(existing_groups)))
+            ).all())
+            # Union of selected + all existing group members
+            all_ids = {sh.id for sh in ships} | {sh.id for sh in group_members}
+            ships = list(s.scalars(select(Shipment).where(Shipment.id.in_(list(all_ids)))).all())
+        new_group = min(sh.id for sh in ships)
+        for sh in ships:
+            sh.link_group = new_group
+        s.commit()
+        return {"ok": True, "link_group": new_group, "count": len(ships)}
+
+
+@app.post("/api/shipments/unlink")
+def unlink_shipments(payload: IdsPayload):
+    """Remove selected shipments from their link group.
+
+    If unlinking leaves only one member in a group, that lone member is
+    also unlinked (a group of 1 has no meaning).
+    """
+    ids = list({int(i) for i in payload.ids})
+    with Session(engine) as s:
+        ships = list(s.scalars(select(Shipment).where(Shipment.id.in_(ids))).all())
+        affected_groups = {sh.link_group for sh in ships if sh.link_group is not None}
+        if not affected_groups:
+            return {"ok": True, "count": 0}
+        for sh in ships:
+            sh.link_group = None
+        # If a group now has only 1 member remaining, clear that one too
+        for gid in affected_groups:
+            remaining = list(s.scalars(
+                select(Shipment).where(
+                    Shipment.link_group == gid,
+                    Shipment.id.not_in(ids)
+                )
+            ).all())
+            if len(remaining) == 1:
+                remaining[0].link_group = None
+        s.commit()
+        return {"ok": True, "count": len(ships)}
 
 
 @app.get("/api/dashboard")

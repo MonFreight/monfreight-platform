@@ -553,6 +553,64 @@ main {
 .dataTable tbody tr.selected { background: var(--brand-soft); }
 .dataTable tbody tr.selected.paid { background: #a7f3d0; }
 
+/* ── Linked-box group colours ────────────────────────────────────────────
+   Each group gets a tinted background + a bold left-border accent.
+   The left border uses box-shadow so it never shifts column widths.
+   These styles sit above paid/selected in specificity intentionally —
+   the link indicator is identity-level, not status-level.           */
+:root {
+  --lg1: #bdd7ee; --lg1b: #5a9fd4;
+  --lg2: #fde8d8; --lg2b: #e07b45;
+  --lg3: #ffd966; --lg3b: #c9a100;
+  --lg4: #ddd5f3; --lg4b: #7c5cbf;
+  --lg5: #d5efc9; --lg5b: #5a9e3a;
+  --lg6: #fce4cf; --lg6b: #d4682a;
+  --lg7: #c8eaf9; --lg7b: #2b8fbf;
+  --lg8: #f0d5ee; --lg8b: #b04fa0;
+}
+.dataTable tbody tr.lg1 { background: var(--lg1); box-shadow: inset 4px 0 0 var(--lg1b); }
+.dataTable tbody tr.lg2 { background: var(--lg2); box-shadow: inset 4px 0 0 var(--lg2b); }
+.dataTable tbody tr.lg3 { background: var(--lg3); box-shadow: inset 4px 0 0 var(--lg3b); }
+.dataTable tbody tr.lg4 { background: var(--lg4); box-shadow: inset 4px 0 0 var(--lg4b); }
+.dataTable tbody tr.lg5 { background: var(--lg5); box-shadow: inset 4px 0 0 var(--lg5b); }
+.dataTable tbody tr.lg6 { background: var(--lg6); box-shadow: inset 4px 0 0 var(--lg6b); }
+.dataTable tbody tr.lg7 { background: var(--lg7); box-shadow: inset 4px 0 0 var(--lg7b); }
+.dataTable tbody tr.lg8 { background: var(--lg8); box-shadow: inset 4px 0 0 var(--lg8b); }
+/* hover keeps the tint, just slightly lighter */
+.dataTable tbody tr.lg1:hover { background: #cce3f2; }
+.dataTable tbody tr.lg2:hover { background: #fdf0e8; }
+.dataTable tbody tr.lg3:hover { background: #ffe480; }
+.dataTable tbody tr.lg4:hover { background: #e8e0f6; }
+.dataTable tbody tr.lg5:hover { background: #e2f5d6; }
+.dataTable tbody tr.lg6:hover { background: #fdeee3; }
+.dataTable tbody tr.lg7:hover { background: #d8f0fb; }
+.dataTable tbody tr.lg8:hover { background: #f5e1f3; }
+/* selected overrides tint but keeps the left border */
+.dataTable tbody tr.selected.lg1,
+.dataTable tbody tr.selected.lg2,
+.dataTable tbody tr.selected.lg3,
+.dataTable tbody tr.selected.lg4,
+.dataTable tbody tr.selected.lg5,
+.dataTable tbody tr.selected.lg6,
+.dataTable tbody tr.selected.lg7,
+.dataTable tbody tr.selected.lg8 { background: var(--brand-soft); }
+
+/* Link icon badge next to box number */
+.link-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 10px;
+  margin-left: 4px;
+  vertical-align: middle;
+  cursor: default;
+  white-space: nowrap;
+}
+.link-badge::before { content: "🔗"; font-size: 10px; }
+
 /* Inline edit cells */
 .dataTable .ed {
   display: inline-block;
