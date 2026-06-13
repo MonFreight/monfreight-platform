@@ -599,18 +599,29 @@ def delete_user(user_id: int, request: Request):
 # middleware + init
 # --------------------------------------------------------------------------
 def _bootstrap_admin(engine) -> None:
+    username = os.environ.get("ADMIN_USERNAME", "admin").strip().lower()
+    force_reset = os.environ.get("ADMIN_RESET", "") in ("1", "true")
     with Session(engine) as s:
-        if s.scalar(select(User).limit(1)):
+        has_users = s.scalar(select(User).limit(1)) is not None
+        if has_users and not force_reset:
             return
-        username = os.environ.get("ADMIN_USERNAME", "admin").strip().lower()
         password = os.environ.get("ADMIN_PASSWORD", "")
         generated = False
         if not password:
             password = secrets.token_urlsafe(9)
             generated = True
-        s.add(User(username=username, password_hash=hash_password(password),
-                   phone=os.environ.get("ADMIN_PHONE", "").strip(), role="admin"))
+        u = s.scalar(select(User).where(User.username == username))
+        if u:
+            u.password_hash = hash_password(password)
+            u.phone = os.environ.get("ADMIN_PHONE", u.phone or "").strip()
+            u.role, u.active = "admin", True
+        else:
+            s.add(User(username=username, password_hash=hash_password(password),
+                       phone=os.environ.get("ADMIN_PHONE", "").strip(), role="admin"))
         s.commit()
+        if has_users:
+            log.warning("ADMIN_RESET applied — account '%s' reset from environment "
+                        "variables. Remove the ADMIN_RESET variable now.", username)
     banner = "=" * 62
     log.warning("\n%s\n  FIRST RUN — default admin account created\n"
                 "  username : %s\n  password : %s%s\n"
