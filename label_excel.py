@@ -143,7 +143,7 @@ def build_aircargo_xlsx(rows: list[dict], batch_date: dt.date, out) -> None:
         "Овог, нэр", "Утас", "Гэрийн хаяг", "Хот", "Улс",
         "Барааны тайлбар", "Нийт үнэлгээ", "Ачааны жин",
         "Нэгж үнэ AU$", "Нэмэлт төлбөр", "Нийт үнэ AU$",
-        "Хүргэлттэй эсэх",
+        "Хүргэлттэй эсэх", "Дотоод тэмдэглэл",
     ]
     for i, h in enumerate(headers, 1):
         c = ws.cell(row=5, column=i, value=h)
@@ -176,15 +176,16 @@ def build_aircargo_xlsx(rows: list[dict], batch_date: dt.date, out) -> None:
         ws.cell(row=excel_row, column=18, value=r.get("extra_charges") or 0)
         ws.cell(row=excel_row, column=19, value=r.get("total_aud") or 0)
         ws.cell(row=excel_row, column=20, value=r.get("delivery_note") or "")
+        ws.cell(row=excel_row, column=21, value=r.get("notes") or "")
         is_paid = bool(r.get("paid"))
-        for col in range(1, 21):
+        for col in range(1, 22):
             cell = ws.cell(row=excel_row, column=col)
             cell.border = box
             cell.alignment = Alignment(wrap_text=True, vertical="center")
             if is_paid:
                 cell.fill = paid_fill
 
-    widths = [7, 14, 22, 14, 30, 14, 14, 14, 22, 18, 30, 14, 14, 30, 12, 10, 12, 11, 12, 18]
+    widths = [7, 14, 22, 14, 30, 14, 14, 14, 22, 18, 30, 14, 14, 30, 12, 10, 12, 11, 12, 18, 24]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 

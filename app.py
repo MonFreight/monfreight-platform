@@ -1361,6 +1361,7 @@ async def import_aircargo(date: str, request: Request):
                     extra_charges=extra,
                     total_aud=(price * weight) + extra,
                     delivery_note=_txt(ws.cell(row=r, column=20).value),
+                    notes=_txt(ws.cell(row=r, column=21).value),
                 )
                 s.add(ship)
                 added += 1
