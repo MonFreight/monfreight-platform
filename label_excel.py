@@ -198,9 +198,10 @@ def build_aircargo_xlsx(rows: list[dict], batch_date: dt.date, out) -> None:
         ws.cell(row=excel_row, column=21, value=r.get("notes") or "")
         is_paid = bool(r.get("paid"))
         lg = r.get("link_group")
-        row_fill = _group_fill.get(lg) if lg is not None else None
-        if row_fill is None and is_paid:
-            row_fill = paid_fill
+        # Link group colour takes priority so all boxes in a group share
+        # the same shade even when some are paid. Paid status is still
+        # visible in the dedicated Status column (tick / green text).
+        row_fill = _group_fill.get(lg) if lg is not None else (paid_fill if is_paid else None)
         for col in range(1, 22):
             cell = ws.cell(row=excel_row, column=col)
             cell.border = box

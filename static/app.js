@@ -302,11 +302,11 @@ function renderTable() {
     // Build link badge for the Box column
     let linkBadge = "";
     if (r.link_group != null) {
-      const related = (_lgBoxLabels[r.link_group] || []).join(", ");
       const cls = _lgClassMap[r.link_group] || "";
-      const borderColor = getComputedStyle(document.documentElement)
-        .getPropertyValue(`--${cls}b`).trim() || "#666";
-      linkBadge = `<span class="link-badge" style="background:var(--${cls});color:var(--${cls}b);border:1px solid var(--${cls}b)" title="Related: ${escapeAttr(related)}"></span>`;
+      // Tooltip shows the OTHER boxes in the group, not the current one
+      const others = (_lgBoxLabels[r.link_group] || []).filter(label => label !== `BOX ${r.box_number}`).join(", ");
+      const tipText = others ? `Linked with: ${others}` : "Linked";
+      linkBadge = `<span class="link-badge" style="background:var(--${cls});color:var(--${cls}b);border:1px solid var(--${cls}b)" title="${escapeAttr(tipText)}"></span>`;
     }
 
     tr.innerHTML = `
@@ -483,9 +483,16 @@ $("#linkBoxesBtn")?.addEventListener("click", async () => {
   });
   if (!res.ok) { toast("Link failed — " + (await safeJson(res))?.detail, "err"); return; }
   const data = await res.json();
-  // Update local shipments with new link_group
+  // Collect old group ids that were merged into the new group
+  const mergedGroups = new Set(ids.map(id => {
+    const s = shipments.find(r => r.id === id);
+    return s ? s.link_group : null;
+  }).filter(g => g != null));
+  // Update all members of merged groups AND the selected ids
   shipments.forEach(r => {
-    if (ids.includes(r.id)) r.link_group = data.link_group;
+    if (ids.includes(r.id) || mergedGroups.has(r.link_group)) {
+      r.link_group = data.link_group;
+    }
   });
   renderTable();
   toast(`${data.count} boxes linked.`);
