@@ -374,8 +374,13 @@ def _ensure_local(name: str) -> Path:
     raise HTTPException(404, "Backup not found locally or in Google Drive.")
 
 
-def restore_backup(name: str) -> dict:
-    """Verify integrity → safety snapshot → transactional restore."""
+def restore_backup(name: str, skip_snapshot: bool = False) -> dict:
+    """Verify integrity → (optional) safety snapshot → transactional restore.
+
+    skip_snapshot=True is used by auto_restore_on_startup when the database
+    is empty; there is nothing worth snapshotting and we don't want to
+    upload an empty backup to Google Drive.
+    """
     path = _ensure_local(name)
 
     with zipfile.ZipFile(path) as zf:
@@ -392,8 +397,8 @@ def restore_backup(name: str) -> dict:
                 raise HTTPException(400,
                     f"Integrity check FAILED for {rel} — backup not restored.")
 
-        # 1) safety snapshot of current state (kept locally)
-        snapshot = create_backup(reason="pre-restore", upload=False)
+        # 1) safety snapshot of current state (skipped when DB is already empty)
+        snapshot = create_backup(reason="pre-restore", upload=False) if not skip_snapshot else None
 
         with _lock:
             # 2) restore database inside one transaction
@@ -411,10 +416,10 @@ def restore_backup(name: str) -> dict:
 
     log.warning("RESTORE COMPLETED from %s — rows: %s, files: %d "
                 "(safety snapshot: %s)", name, counts, len(restored_files),
-                snapshot["name"])
+                snapshot["name"] if snapshot else "skipped (DB was empty)")
     return {"ok": True, "restored_from": name, "row_counts": counts,
             "files_restored": len(restored_files),
-            "safety_snapshot": snapshot["name"]}
+            "safety_snapshot": snapshot["name"] if snapshot else None}
 
 
 def last_backup_info() -> Optional[dict]:
@@ -469,6 +474,90 @@ def api_restore(payload: RestoreIn, request: Request):
 
 
 # --------------------------------------------------------------------------
+# auto-restore on startup
+# --------------------------------------------------------------------------
+async def _auto_restore_on_startup() -> None:
+    """Restore the latest backup automatically when the database is empty.
+
+    This runs once at every startup *before* the daily scheduler begins.
+    It is the key guard against data loss on Railway (or any platform with
+    an ephemeral filesystem): each redeploy wipes the SQLite file, so on
+    boot the database is empty and we pull the latest backup from Google
+    Drive (or the local backup directory if a Volume is mounted).
+
+    Behaviour
+    ---------
+    * Checks whether the ``shipments`` table is empty.
+    * If empty, finds the newest non-pre-restore backup (Drive or local).
+    * Restores it without creating a useless empty safety snapshot.
+    * Logs clearly at WARNING level so the restore is visible in Railway logs.
+
+    Control
+    -------
+    Set ``AUTO_RESTORE=0`` (or ``false``) in Railway → Variables to disable.
+    Default is enabled.  Use ``AUTO_RESTORE=0`` only if you are certain your
+    database is always persistent (e.g. Railway PostgreSQL with no data loss).
+    """
+    if os.environ.get("AUTO_RESTORE", "1").strip().lower() in ("0", "false", "no"):
+        log.info("Auto-restore: disabled via AUTO_RESTORE env var.")
+        return
+
+    # ── 1. check whether a restore is needed ──────────────────────────────
+    try:
+        meta = MetaData()
+        meta.reflect(bind=_engine)
+        if "shipments" not in meta.tables:
+            log.info("Auto-restore: shipments table not found yet, skipping.")
+            return
+        with _engine.connect() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM shipments")).scalar()
+        if count and count > 0:
+            log.info("Auto-restore: database has %d shipment(s) — no restore needed.", count)
+            return
+    except Exception as exc:                          # noqa: BLE001
+        log.error("Auto-restore: could not read shipments table: %s", exc)
+        return
+
+    # ── 2. find the best available backup ─────────────────────────────────
+    try:
+        candidates = [b for b in list_backups() if not b.get("pre_restore")]
+    except Exception as exc:                          # noqa: BLE001
+        log.error("Auto-restore: could not list backups: %s", exc)
+        return
+
+    if not candidates:
+        log.warning(
+            "Auto-restore: shipments table is EMPTY and no backups are available "
+            "(Drive not configured or no backups uploaded yet).  "
+            "Starting with an empty database."
+        )
+        return
+
+    latest = candidates[0]   # list_backups() returns newest-first
+    log.warning(
+        "Auto-restore: EMPTY database detected on startup — "
+        "restoring from backup: %s  (Drive=%s, local=%s)",
+        latest["name"], latest.get("drive"), latest.get("local"),
+    )
+
+    # ── 3. restore ─────────────────────────────────────────────────────────
+    try:
+        result = await asyncio.to_thread(
+            restore_backup, latest["name"], True   # skip_snapshot=True
+        )
+        log.warning(
+            "Auto-restore COMPLETED: %d shipment row(s) restored from %s.",
+            result.get("row_counts", {}).get("shipments", 0),
+            latest["name"],
+        )
+    except Exception as exc:                          # noqa: BLE001
+        log.error(
+            "Auto-restore FAILED — application is starting with an empty database. "
+            "Error: %s", exc,
+        )
+
+
+# --------------------------------------------------------------------------
 # daily scheduler
 # --------------------------------------------------------------------------
 async def _scheduler() -> None:
@@ -507,6 +596,8 @@ def init_backup(app, engine) -> None:
 
     @app.on_event("startup")
     async def _start_scheduler():
+        # Auto-restore must complete first so the scheduler sees real data.
+        await _auto_restore_on_startup()
         asyncio.create_task(_scheduler())
 
     log.info("Backups enabled: daily at %s UTC, retention %d days, Drive: %s",

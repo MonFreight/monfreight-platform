@@ -1,0 +1,56 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "uvicorn app:app --host 0.0.0.0 --port $PORT"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PERSISTENT STORAGE — REQUIRED to prevent password resets on redeploy
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Railway's filesystem is ephemeral: every redeploy wipes the container,
+# including the SQLite database at data/monfreight.db.  Without persistent
+# storage the app creates a fresh database on every boot and generates a
+# new random admin password each time.
+#
+# Choose ONE of the two options below and follow the steps:
+#
+# ── Option A: Railway PostgreSQL (recommended) ────────────────────────────────
+#   1. In the Railway dashboard, click "+ New" → "Database" → "PostgreSQL".
+#   2. In your web service's Variables tab, add:
+#        DATABASE_URL  =  ${{Postgres.DATABASE_URL}}   (Railway fills this in)
+#   3. Done.  The app detects a non-sqlite DATABASE_URL and uses PostgreSQL.
+#
+# ── Option B: Railway Volume (keeps SQLite) ───────────────────────────────────
+#   1. In the Railway dashboard, open your service → "Volumes" tab.
+#   2. Click "Add Volume", set the mount path to:  /app/data
+#      (matches DATA_DIR in app.py when the working directory is /app)
+#   3. Done.  The data/ folder is now preserved across deploys.
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# REQUIRED ENVIRONMENT VARIABLES (set in Railway → Variables)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+#   SECRET_KEY      Long random string for signing session cookies.
+#                   Generate once: python -c "import secrets; print(secrets.token_hex(32))"
+#                   Never change this after the first deploy (it invalidates sessions).
+#
+#   ADMIN_USERNAME  (optional) Username for the initial admin. Default: admin
+#   ADMIN_PASSWORD  (optional) Password for the initial admin.
+#                   Only used when NO admin account exists yet (first run).
+#                   Ignored on all subsequent deploys — stored password is kept.
+#
+#   AUTO_RESTORE    (optional) Set to "0" to disable automatic restore on startup.
+#                   Default: enabled.  On every boot, if the shipments table is
+#                   empty, the app automatically downloads and restores the latest
+#                   backup from Google Drive (or local backup dir if a Volume is
+#                   mounted).  This prevents data loss after Railway redeployments.
+#
+# ── To deliberately reset the admin password ─────────────────────────────────
+#   1. Set  ADMIN_RESET=1  and  ADMIN_PASSWORD=<new-password>  in Variables.
+#   2. Redeploy once.
+#   3. Remove ADMIN_RESET from Variables immediately after.
+#
+# ──────────────────────────────────────────────────────────────────────────────
