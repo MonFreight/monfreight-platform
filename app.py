@@ -508,11 +508,19 @@ def index(request: Request,
 
 
 @app.get("/api/shipments")
-def list_shipments(start: Optional[str] = None, end: Optional[str] = None):
+def list_shipments(start: Optional[str] = None, end: Optional[str] = None,
+                   q: Optional[str] = None, page: int = 0):
     sd = dt.date.fromisoformat(start) if start else None
     ed = dt.date.fromisoformat(end) if end else None
     with Session(engine) as s:
-        return [to_dict(r) for r in all_shipments(s, sd, ed)]
+        rows = all_shipments(s, sd, ed)
+        if q:
+            rows = _filter_shipments(rows, q)
+        if page > 0:
+            rows.sort(key=lambda r: (-r.batch_date.toordinal(), r.box_number or 0))
+            start_idx = (page - 1) * PAGE_SIZE
+            rows = rows[start_idx:start_idx + PAGE_SIZE]
+        return [to_dict(r) for r in rows]
 
 
 @app.post("/api/shipments")

@@ -2010,6 +2010,7 @@ renderTable();
 // ============================================================
 // BACKGROUND POLL — refresh shipments every 15 seconds so
 // changes made by other users appear without a manual reload.
+// Preserves current page, search query, and date filters.
 // Skipped when a modal is open or the user is not on the
 // Shipments panel (avoids disrupting active editing).
 // ============================================================
@@ -2028,9 +2029,12 @@ renderTable();
     if (modalOpen) return;
 
     try {
+      // Mirror the exact page/filter/search the user is currently viewing
       const params = new URLSearchParams();
-      if (_filterStart) params.set("start", _filterStart);
-      if (_filterEnd)   params.set("end",   _filterEnd);
+      if (window.FILTER_START) params.set("start", window.FILTER_START);
+      if (window.FILTER_END)   params.set("end",   window.FILTER_END);
+      if (window.SEARCH_Q)     params.set("q",     window.SEARCH_Q);
+      if (window.PAGE > 1)     params.set("page",  window.PAGE);
       const url = "/api/shipments" + (params.toString() ? "?" + params : "");
       const res = await fetch(url);
       if (!res.ok) return;
