@@ -30,6 +30,7 @@
     <a href="#" data-panel="customers">Customers</a>
     <a href="#" data-panel="labels">Labels &amp; Print</a>
     <a href="#" data-panel="reports">Reports</a>
+    <a href="#" data-panel="activity" id="navActivity" style="display:none;">Activity Logs</a>
     <a href="#" data-panel="settings">Settings</a>
   </nav>
 
@@ -800,6 +801,58 @@
         <code>=weight*6 + value*0.02</code>
       </p>
     </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     PANEL: ACTIVITY LOGS (admin only)
+     ================================================================ -->
+<section class="panel" id="panel-activity">
+  <div class="card hidden" id="activityCard">
+    <div class="card-header">
+      <h2>User Activity Logs</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="search" id="activityUserFilter" placeholder="Filter by user…"
+               style="width:140px;padding:6px 10px;border:1px solid var(--line-strong);
+                      border-radius:var(--radius-sm);font-size:12px;font-family:inherit;">
+        <input type="search" id="activityActionFilter" placeholder="Filter by action…"
+               style="width:160px;padding:6px 10px;border:1px solid var(--line-strong);
+                      border-radius:var(--radius-sm);font-size:12px;font-family:inherit;">
+        <button class="btn small primary" id="activityFilterBtn">Apply</button>
+        <button class="btn small ghost" id="activityClearBtn">Clear</button>
+        <button class="btn small" id="activityRefreshBtn">Refresh</button>
+      </div>
+    </div>
+    <p class="muted small" style="margin:0 0 12px;">
+      Records of significant actions performed within the system — logins, shipment changes,
+      Excel imports/exports, user management, and backups.
+    </p>
+    <div class="rowscroll">
+      <table class="dataTable" id="activityTable" style="table-layout:auto;">
+        <thead>
+          <tr>
+            <th style="width:140px;">Date &amp; Time (UTC)</th>
+            <th style="width:110px;">User</th>
+            <th style="width:160px;">Action</th>
+            <th>Details</th>
+            <th style="width:100px;">IP Address</th>
+          </tr>
+        </thead>
+        <tbody id="activityTableBody">
+          <tr><td colspan="5" class="muted small" style="padding:16px;text-align:center;">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+      <p class="muted small" id="activityFooter"></p>
+      <div style="display:flex;gap:6px;">
+        <button class="btn small ghost" id="activityPrevBtn" disabled>‹ Prev</button>
+        <button class="btn small ghost" id="activityNextBtn" disabled>Next ›</button>
+      </div>
+    </div>
+  </div>
+  <div class="card hidden" id="activityNoAccess">
+    <p class="muted" style="padding:8px 0;">Activity Logs are only visible to administrators.</p>
   </div>
 </section>
 

@@ -284,8 +284,83 @@ def _sha256(data: bytes) -> str:
 # --------------------------------------------------------------------------
 # create / list / restore
 # --------------------------------------------------------------------------
+def _recent_batch_excels(n: int = 4) -> list[tuple[str, bytes]]:
+    """Build Air-Cargo Excel files for the most recent `n` batch dates.
+    Returns a list of (filename, bytes) tuples.  Silently skips any batch
+    that fails to export (e.g. missing label template)."""
+    try:
+        import io as _io
+        from sqlalchemy import select as _sel, MetaData as _Meta
+        from label_excel import build_aircargo_xlsx
+        import datetime as _dt
+
+        # Reflect tables through the engine directly (backup.py may be
+        # imported before app.py finishes wiring, so we avoid app imports).
+        meta = _Meta()
+        meta.reflect(bind=_engine)
+        if "shipments" not in meta.tables:
+            return []
+        table = meta.tables["shipments"]
+
+        with _engine.connect() as conn:
+            # Fetch the N most recent distinct batch dates
+            dates_q = (
+                _sel(table.c.batch_date)
+                .distinct()
+                .order_by(table.c.batch_date.desc())
+                .limit(n)
+            )
+            batch_dates = [r[0] for r in conn.execute(dates_q).fetchall()]
+
+        results = []
+        for bd in batch_dates:
+            try:
+                with _engine.connect() as conn:
+                    rows_q = (
+                        _sel(table)
+                        .where(table.c.batch_date == bd)
+                        .order_by(table.c.box_number)
+                    )
+                    raw = conn.execute(rows_q).fetchall()
+                    cols = [c.name for c in table.columns]
+
+                def _safe(v):
+                    if isinstance(v, (_dt.datetime, _dt.date)):
+                        return v.isoformat()
+                    return v
+
+                row_dicts = [{c: _safe(v) for c, v in zip(cols, r)} for r in raw]
+                if not row_dicts:
+                    continue
+
+                # bd may be a date or string
+                if isinstance(bd, str):
+                    bd_date = _dt.date.fromisoformat(bd)
+                else:
+                    bd_date = bd
+
+                buf = _io.BytesIO()
+                build_aircargo_xlsx(row_dicts, bd_date, buf)
+                buf.seek(0)
+                fname = f"Shipments_{bd_date.strftime('%Y-%m-%d')}.xlsx"
+                results.append((fname, buf.read()))
+            except Exception as e:
+                log.warning("Could not export batch %s to Excel for backup: %s", bd, e)
+        return results
+    except Exception as e:
+        log.warning("Skipping batch Excel export in backup: %s", e)
+        return []
+
+
 def create_backup(reason: str = "auto", upload: bool = True) -> dict:
-    """Build a backup zip, store locally, upload to Drive, prune old copies."""
+    """Build a backup zip, store locally, upload to Drive, prune old copies.
+
+    The ZIP contains:
+    - database.json   — full JSON dump of all DB tables
+    - files/*         — data-dir files (templates, uploads)
+    - batch_exports/  — Air Cargo Excel for the 4 most recent batch dates
+    - manifest.json   — names + SHA-256 checksums of all entries
+    """
     with _lock:
         now = dt.datetime.utcnow()
         suffix = "_pre-restore" if reason == "pre-restore" else ""
@@ -296,12 +371,16 @@ def create_backup(reason: str = "auto", upload: bool = True) -> dict:
         db_bytes = json.dumps(dump, ensure_ascii=False).encode()
         files = _data_files()
 
+        # Build Excel files for the 4 most recent batch dates
+        batch_excels = _recent_batch_excels(4)
+
         manifest = {
             "name": name, "reason": reason,
             "created_at": now.isoformat() + "Z",
             "row_counts": {t: len(p["rows"]) for t, p in dump["tables"].items()},
             "checksums": {"database.json": _sha256(db_bytes)},
             "files": {},
+            "batch_exports": {},
         }
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("database.json", db_bytes)
@@ -310,10 +389,15 @@ def create_backup(reason: str = "auto", upload: bool = True) -> dict:
                 data = f.read_bytes()
                 manifest["files"][rel] = _sha256(data)
                 zf.writestr(rel, data)
+            for fname, data in batch_excels:
+                rel = f"batch_exports/{fname}"
+                manifest["batch_exports"][rel] = _sha256(data)
+                zf.writestr(rel, data)
             zf.writestr("manifest.json", json.dumps(manifest, indent=2))
 
         size = path.stat().st_size
-        log.info("Backup created: %s (%.1f KB, reason=%s)", name, size / 1024, reason)
+        log.info("Backup created: %s (%.1f KB, reason=%s, batch_excels=%d)",
+                 name, size / 1024, reason, len(batch_excels))
 
         drive_id = _drive_upload(path) if upload else None
         _prune_local()
@@ -322,6 +406,7 @@ def create_backup(reason: str = "auto", upload: bool = True) -> dict:
 
         return {"name": name, "size": size, "created_at": manifest["created_at"],
                 "row_counts": manifest["row_counts"],
+                "batch_exports_included": [f for f, _ in batch_excels],
                 "uploaded_to_drive": bool(drive_id), "reason": reason}
 
 
@@ -454,8 +539,17 @@ def api_list(request: Request):
 
 @router.post("/run")
 def api_run(request: Request):
-    _admin(request)
-    return create_backup(reason="manual")
+    admin = _admin(request)
+    result = create_backup(reason="manual")
+    try:
+        from activity_log import log_activity
+        ip = request.client.host if request.client else ""
+        log_activity(admin.get("u", "admin"), "backup_created",
+                     f"Manual backup: {result.get('name')}, "
+                     f"size: {result.get('size', 0) // 1024} KB", ip)
+    except Exception:
+        pass
+    return result
 
 
 @router.get("/download/{name}")
@@ -467,10 +561,19 @@ def api_download(name: str, request: Request):
 
 @router.post("/restore")
 def api_restore(payload: RestoreIn, request: Request):
-    _admin(request)
+    admin = _admin(request)
     if not payload.confirm:
         raise HTTPException(400, "Restore not confirmed.")
-    return restore_backup(payload.name)
+    result = restore_backup(payload.name)
+    try:
+        from activity_log import log_activity
+        ip = request.client.host if request.client else ""
+        log_activity(admin.get("u", "admin"), "backup_restored",
+                     f"Restored from: {payload.name}, "
+                     f"safety snapshot: {result.get('safety_snapshot')}", ip)
+    except Exception:
+        pass
+    return result
 
 
 # --------------------------------------------------------------------------

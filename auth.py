@@ -48,6 +48,14 @@ from sqlalchemy.orm import DeclarativeBase, Session
 log = logging.getLogger("monfreight.auth")
 logging.basicConfig(level=logging.INFO)
 
+# Lazy import to avoid circular dependency (activity_log imports auth).
+def _log(username: str, action: str, details: str = "", ip: str = "") -> None:
+    try:
+        from activity_log import log_activity
+        log_activity(username, action, details, ip)
+    except Exception:
+        pass
+
 # --------------------------------------------------------------------------
 # config
 # --------------------------------------------------------------------------
@@ -486,6 +494,8 @@ def auth_verify(payload: VerifyIn, request: Request):
         session_val = _session_signer.dumps(
             {"uid": user.id, "u": user.username, "role": user.role})
 
+    ip = request.client.host if request.client else ""
+    _log(user.username, "login", f"Role: {user.role}", ip)
     resp = JSONResponse({"ok": True, "redirect": "/"})
     _set_cookie(resp, SESSION_COOKIE, session_val, max_age=SESSION_HOURS * 3600)
     resp.delete_cookie(PENDING_COOKIE, path="/")
@@ -493,7 +503,12 @@ def auth_verify(payload: VerifyIn, request: Request):
 
 
 @router.post("/auth/logout")
-def auth_logout():
+def auth_logout(request: Request):
+    # Identify the user before clearing the session cookie
+    user = current_user_id(request)
+    username = user.get("u", "unknown") if user else "unknown"
+    ip = request.client.host if request.client else ""
+    _log(username, "logout", "", ip)
     resp = JSONResponse({"ok": True, "redirect": "/login"})
     resp.delete_cookie(SESSION_COOKIE, path="/")
     resp.delete_cookie(PENDING_COOKIE, path="/")
@@ -529,7 +544,7 @@ def list_users(request: Request):
 
 @router.post("/api/users")
 def create_user(payload: UserIn, request: Request):
-    require_admin(request)
+    admin = require_admin(request)
     username = payload.username.strip().lower()
     if not re.fullmatch(r"[a-z0-9_.-]{3,32}", username):
         raise HTTPException(400, "Username: 3-32 chars, letters/digits/._- only.")
@@ -547,6 +562,9 @@ def create_user(payload: UserIn, request: Request):
                  phone=_normalize_phones(payload.phone), role=payload.role)
         s.add(u)
         s.commit()
+        ip = request.client.host if request.client else ""
+        _log(admin["u"], "user_created",
+             f"Created user: {username}, role: {payload.role}", ip)
         return _user_dict(u)
 
 
@@ -578,6 +596,12 @@ def update_user(user_id: int, payload: UserPatch, request: Request):
                 raise HTTPException(400, "You cannot deactivate your own account.")
             u.active = payload.active
         s.commit()
+        ip = request.client.host if request.client else ""
+        changes = ", ".join(
+            k for k, v in payload.model_dump().items() if v is not None
+        )
+        _log(admin["u"], "user_updated",
+             f"Updated user: {u.username}, fields: {changes}", ip)
         return _user_dict(u)
 
 
@@ -590,8 +614,11 @@ def delete_user(user_id: int, request: Request):
             raise HTTPException(404, "User not found.")
         if u.username == admin["u"]:
             raise HTTPException(400, "You cannot delete your own account.")
+        deleted_username = u.username
         s.delete(u)
         s.commit()
+    ip = request.client.host if request.client else ""
+    _log(admin["u"], "user_deleted", f"Deleted user: {deleted_username}", ip)
     return {"ok": True}
 
 

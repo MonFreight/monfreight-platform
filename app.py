@@ -320,6 +320,16 @@ def mf_for(batch_date: dt.date, box_number: int) -> str:
 _resync_mf_numbers()
 
 
+def _username(request: Request) -> str:
+    """Extract the signed-in username from the request state (set by auth middleware)."""
+    user = getattr(request.state, "user", None)
+    return user.get("u", "unknown") if user else "unknown"
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
 def shipments_for(session: Session, batch_date: dt.date) -> list[Shipment]:
     return list(session.scalars(
         select(Shipment)
@@ -396,10 +406,13 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # --- security & operations add-ons --------------------------------------
 # auth: login + SMS verification + session protection for every page/API
 # backup: automatic daily backups, Google Drive sync, restore
-from auth import init_auth          # noqa: E402
-from backup import init_backup      # noqa: E402
+from auth import init_auth                      # noqa: E402
+from backup import init_backup                  # noqa: E402
+from activity_log import init_activity_log, log_activity, router as activity_router  # noqa: E402
 init_auth(app, engine, templates)
 init_backup(app, engine)
+init_activity_log(engine)
+app.include_router(activity_router)
 
 
 @app.get("/api/health")
@@ -503,7 +516,7 @@ def list_shipments(start: Optional[str] = None, end: Optional[str] = None):
 
 
 @app.post("/api/shipments")
-def create_shipment(payload: ShipmentIn):
+def create_shipment(payload: ShipmentIn, request: Request):
     formula, price = _resolve_price(
         payload.price_formula, payload.price_aud,
         payload.weight, payload.declared_value)
@@ -557,11 +570,16 @@ def create_shipment(payload: ShipmentIn):
                 f"Could not save shipment — MF {mf} likely already exists "
                 f"in the database. ({e.__class__.__name__})")
         s.refresh(ship)
-        return to_dict(ship)
+        result = to_dict(ship)
+        log_activity(_username(request), "shipment_created",
+                     f"MF: {ship.mf_number}, batch: {ship.batch_date}, "
+                     f"sender: {ship.sender_name}, receiver: {ship.receiver_name}",
+                     _client_ip(request))
+        return result
 
 
 @app.put("/api/shipments/{ship_id}")
-def update_shipment(ship_id: int, payload: ShipmentIn):
+def update_shipment(ship_id: int, payload: ShipmentIn, request: Request):
     with Session(engine) as s:
         ship = s.get(Shipment, ship_id)
         if not ship:
@@ -617,11 +635,16 @@ def update_shipment(ship_id: int, payload: ShipmentIn):
                 f"Could not save — MF {ship.mf_number} likely conflicts. "
                 f"({e.__class__.__name__})")
         s.refresh(ship)
-        return to_dict(ship)
+        result = to_dict(ship)
+        log_activity(_username(request), "shipment_updated",
+                     f"MF: {ship.mf_number}, batch: {ship.batch_date}, "
+                     f"sender: {ship.sender_name}, receiver: {ship.receiver_name}",
+                     _client_ip(request))
+        return result
 
 
 @app.patch("/api/shipments/{ship_id}")
-def patch_shipment(ship_id: int, payload: ShipmentPatch):
+def patch_shipment(ship_id: int, payload: ShipmentPatch, request: Request):
     """Partial update used by inline cell edits."""
     with Session(engine) as s:
         ship = s.get(Shipment, ship_id)
@@ -683,31 +706,43 @@ def patch_shipment(ship_id: int, payload: ShipmentPatch):
             ship.weight, ship.price_aud, ship.extra_charges)
         s.commit()
         s.refresh(ship)
+        fields_changed = ", ".join(payload.model_dump(exclude_none=True).keys())
+        log_activity(_username(request), "shipment_patched",
+                     f"MF: {ship.mf_number}, fields: {fields_changed}",
+                     _client_ip(request))
         return to_dict(ship)
 
 
 @app.delete("/api/shipments/{ship_id}")
-def delete_shipment(ship_id: int):
+def delete_shipment(ship_id: int, request: Request):
     with Session(engine) as s:
         ship = s.get(Shipment, ship_id)
         if not ship:
             raise HTTPException(404, "Shipment not found")
+        mf_num = ship.mf_number
+        batch  = ship.batch_date
         s.delete(ship)
         s.commit()
+        log_activity(_username(request), "shipment_deleted",
+                     f"MF: {mf_num}, batch: {batch}", _client_ip(request))
         return {"ok": True}
 
 
 @app.post("/api/shipments/bulk-delete")
-def bulk_delete_shipments(payload: IdsPayload):
+def bulk_delete_shipments(payload: IdsPayload, request: Request):
     """Delete selected shipments in one action."""
     ids = sorted({int(i) for i in payload.ids if int(i) > 0})
     if not ids:
         raise HTTPException(400, "No shipment IDs provided")
     with Session(engine) as s:
         ships = list(s.scalars(select(Shipment).where(Shipment.id.in_(ids))).all())
+        mf_list = ", ".join(sh.mf_number for sh in ships)
         for ship in ships:
             s.delete(ship)
         s.commit()
+    log_activity(_username(request), "shipments_bulk_deleted",
+                 f"Deleted {len(ships)} shipment(s): {mf_list[:500]}",
+                 _client_ip(request))
     return {"ok": True, "deleted": len(ships)}
 
 
@@ -1041,7 +1076,7 @@ def labels_by_ids(request: Request, ids: str = ""):
 # Excel exports
 # --------------------------------------------------------------------------
 @app.get("/batches/{date}/aircargo.xlsx")
-def export_aircargo(date: str):
+def export_aircargo(date: str, request: Request):
     try:
         batch_date = dt.date.fromisoformat(date)
     except ValueError:
@@ -1056,14 +1091,15 @@ def export_aircargo(date: str):
         buf.seek(0)
     except Exception as e:
         raise HTTPException(500, f"Could not build Air Cargo .xlsx: {e}")
+    log_activity(_username(request), "excel_export_aircargo",
+                 f"Batch: {batch_date}, {len(rows)} shipment(s)",
+                 _client_ip(request))
     fname = f"Air_Cargo_{batch_date.strftime('%d_%m_%Y')}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f'attachment; filename="{fname}"',
-            # Bust any browser/proxy cache so deletes/edits show up
-            # in the very next download.
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
         },
@@ -1071,7 +1107,7 @@ def export_aircargo(date: str):
 
 
 @app.get("/batches/{date}/labels.xlsx")
-def export_labels(date: str):
+def export_labels(date: str, request: Request):
     try:
         batch_date = dt.date.fromisoformat(date)
     except ValueError:
@@ -1088,14 +1124,15 @@ def export_labels(date: str):
         raise HTTPException(500, f"Label template missing: {e}")
     except Exception as e:
         raise HTTPException(500, f"Could not build labels .xlsx: {e}")
+    log_activity(_username(request), "excel_export_labels",
+                 f"Batch: {batch_date}, {len(rows)} shipment(s)",
+                 _client_ip(request))
     fname = f"Labels_{batch_date.strftime('%d_%m_%Y')}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f'attachment; filename="{fname}"',
-            # Bust any browser/proxy cache so deletes/edits show up
-            # in the very next download.
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
         },
@@ -1439,6 +1476,11 @@ async def import_aircargo(date: str, request: Request):
             f"(scanned all {ws.max_row} rows). "
             + (f"Errors: {'; '.join(errors[:3])}" if errors else ""))
 
+    log_activity(_username(request), "excel_import",
+                 f"Batch: {date}, imported {added} shipment(s), "
+                 f"skipped {len(skipped_rows)}"
+                 + (f", errors: {'; '.join(errors[:3])}" if errors else ""),
+                 _client_ip(request))
     return {
         "added": added,
         "skipped": len(skipped_rows),

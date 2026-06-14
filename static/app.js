@@ -53,6 +53,7 @@ function switchPanel(name) {
   if (name === "customers") loadCustomers();
   if (name === "reports")   loadReports();
   if (name === "settings")  loadSettings();
+  if (name === "activity")  loadActivityPanel();
 
   // Sync the labels panel selection state
   if (name === "labels") syncLabelsPanel();
@@ -1876,6 +1877,124 @@ function initFlatpickr() {
     onChange: (_, dateStr) => rebuildLabelPanelLinks(dateStr),
   });
 }
+
+// ============================================================
+// ACTIVITY LOGS PANEL (admin only)
+// ============================================================
+
+const _ACT_PAGE_SIZE = 100;
+let _actOffset = 0;
+let _actTotal  = 0;
+
+// Pretty-print action names for display
+const _ACTION_LABELS = {
+  login:                    "Login",
+  logout:                   "Logout",
+  shipment_created:         "Shipment Created",
+  shipment_updated:         "Shipment Updated",
+  shipment_patched:         "Shipment Edited (inline)",
+  shipment_deleted:         "Shipment Deleted",
+  shipments_bulk_deleted:   "Bulk Delete",
+  excel_import:             "Excel Import",
+  excel_export_aircargo:    "Export — Air Cargo",
+  excel_export_labels:      "Export — Labels",
+  user_created:             "User Created",
+  user_updated:             "User Updated",
+  user_deleted:             "User Deleted",
+  backup_created:           "Backup Created",
+  backup_restored:          "Backup Restored",
+};
+
+function _actionLabel(action) {
+  return _ACTION_LABELS[action] || action.replace(/_/g, " ");
+}
+
+function _actionClass(action) {
+  if (action === "login")  return "color:var(--success);font-weight:600;";
+  if (action === "logout") return "color:var(--muted);";
+  if (action.includes("delete")) return "color:var(--danger);font-weight:600;";
+  if (action.includes("restore")) return "color:var(--danger);";
+  if (action.includes("import") || action.includes("export")) return "color:var(--brand);";
+  if (action.includes("backup")) return "color:#7c6f00;";
+  if (action.includes("user")) return "color:#5a2d82;";
+  return "";
+}
+
+async function loadActivityLogs(offset = 0) {
+  const tbody = $("#activityTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="5" class="muted small" style="padding:16px;text-align:center;">Loading…</td></tr>`;
+
+  const userF   = ($("#activityUserFilter")?.value   || "").trim();
+  const actionF = ($("#activityActionFilter")?.value || "").trim();
+  let url = `/api/activity-logs?limit=${_ACT_PAGE_SIZE}&offset=${offset}`;
+  if (userF)   url += `&user=${encodeURIComponent(userF)}`;
+  if (actionF) url += `&action=${encodeURIComponent(actionF)}`;
+
+  try {
+    const res = await authFetch(url);
+    if (!res.ok) { tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load logs.</td></tr>`; return; }
+    const d = await res.json();
+    _actTotal  = d.total || 0;
+    _actOffset = offset;
+
+    if (!d.logs || d.logs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="muted small" style="padding:16px;text-align:center;">No activity logs found.</td></tr>`;
+    } else {
+      tbody.innerHTML = d.logs.map(r => `
+        <tr>
+          <td class="small" style="white-space:nowrap;">${(r.timestamp || "").slice(0, 16).replace("T", " ")}</td>
+          <td><strong>${escapeHtml(r.username)}</strong></td>
+          <td class="small" style="${_actionClass(r.action)}">${escapeHtml(_actionLabel(r.action))}</td>
+          <td class="small" style="color:var(--ink-soft);">${escapeHtml(r.details || "")}</td>
+          <td class="small muted">${escapeHtml(r.ip || "")}</td>
+        </tr>`).join("");
+    }
+
+    const shown = Math.min(offset + _ACT_PAGE_SIZE, _actTotal);
+    const foot = $("#activityFooter");
+    if (foot) foot.textContent = `Showing ${offset + 1}–${shown} of ${_actTotal} log entries`;
+
+    const prevBtn = $("#activityPrevBtn");
+    const nextBtn = $("#activityNextBtn");
+    if (prevBtn) prevBtn.disabled = offset === 0;
+    if (nextBtn) nextBtn.disabled = offset + _ACT_PAGE_SIZE >= _actTotal;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">Error loading logs.</td></tr>`;
+    console.warn("[Mon Freight] Activity log load failed:", e);
+  }
+}
+
+async function loadActivityPanel() {
+  if (!CURRENT_USER) await initAuth();
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "admin";
+  $("#activityCard")?.classList.toggle("hidden", !isAdmin);
+  $("#activityNoAccess")?.classList.toggle("hidden", isAdmin);
+  if (isAdmin) loadActivityLogs(0);
+}
+
+$("#activityFilterBtn")?.addEventListener("click", () => loadActivityLogs(0));
+$("#activityClearBtn")?.addEventListener("click", () => {
+  if ($("#activityUserFilter"))   $("#activityUserFilter").value   = "";
+  if ($("#activityActionFilter")) $("#activityActionFilter").value = "";
+  loadActivityLogs(0);
+});
+$("#activityRefreshBtn")?.addEventListener("click", () => loadActivityLogs(_actOffset));
+$("#activityPrevBtn")?.addEventListener("click", () => {
+  if (_actOffset > 0) loadActivityLogs(Math.max(0, _actOffset - _ACT_PAGE_SIZE));
+});
+$("#activityNextBtn")?.addEventListener("click", () => {
+  if (_actOffset + _ACT_PAGE_SIZE < _actTotal) loadActivityLogs(_actOffset + _ACT_PAGE_SIZE);
+});
+
+// Show the "Activity Logs" nav link for admins after auth check
+(async () => {
+  if (!CURRENT_USER) await initAuth();
+  if (CURRENT_USER && CURRENT_USER.role === "admin") {
+    const navLink = $("#navActivity");
+    if (navLink) navLink.style.display = "";
+  }
+})();
 
 initFlatpickr();
 rebuildExportLinks();
