@@ -1686,7 +1686,7 @@ async function loadBackups() {
     $("#backupSchedule").textContent =
       `Daily at ${d.schedule_utc} UTC · keep ${d.retention_days} days`;
     const drv = $("#backupDrive");
-    drv.textContent = d.drive_configured ? "Google Drive ✓" : "Local disk only — Drive not configured";
+    drv.textContent = d.drive_configured ? "OneDrive ✓" : "Local disk only — OneDrive not configured";
     drv.classList.toggle("warn", !d.drive_configured);
     const real = d.backups.filter(b => !b.pre_restore);
     $("#backupLast").textContent = real.length

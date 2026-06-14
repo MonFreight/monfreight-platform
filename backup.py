@@ -1,5 +1,5 @@
 """
-Mon Freight CDP — Automatic backup, cloud sync (Google Drive) and restore.
+Mon Freight CDP — Automatic backup, cloud sync (OneDrive) and restore.
 
 What gets backed up
 -------------------
@@ -7,29 +7,31 @@ What gets backed up
   — works identically for SQLite and PostgreSQL.
 * Every file in the data/ folder (label templates, uploads), excluding the
   live database file and secrets.
+* Air Cargo Excel files for the 4 most recent batch dates.
 * A manifest with SHA-256 checksums so integrity can be verified on restore.
 
 Schedule & retention
 --------------------
 * Automatic daily backup at BACKUP_TIME_UTC (default 17:00 UTC ≈ 3am Sydney).
 * A catch-up backup runs at startup if the last one is older than 25 hours.
-* Local + Google Drive copies are both kept for BACKUP_RETENTION_DAYS (30).
+* Local + OneDrive copies are both kept for BACKUP_RETENTION_DAYS (30).
 
 Restore
 -------
-* Admin picks a backup (local or Drive) in Settings → confirmation screen →
+* Admin picks a backup (local or OneDrive) in Settings → confirmation screen →
   one-click restore.
 * Integrity: checksums verified first; an automatic "pre-restore" safety
   snapshot is taken; the table reload runs inside a single transaction.
 
 Environment variables
 ---------------------
-GDRIVE_SERVICE_ACCOUNT_JSON  full JSON key of a Google service account, or
-GDRIVE_SERVICE_ACCOUNT_FILE  path to the key file
-GDRIVE_FOLDER_ID             ID of the Drive folder shared with that account
-BACKUP_TIME_UTC              "HH:MM" daily run time (default "17:00")
-BACKUP_RETENTION_DAYS        default 30
-BACKUP_DIR                   local folder (default data/backups)
+ONEDRIVE_CLIENT_ID       Azure app (client) ID
+ONEDRIVE_CLIENT_SECRET   Azure app client secret
+ONEDRIVE_REFRESH_TOKEN   OAuth 2.0 refresh token (obtained once via setup flow)
+ONEDRIVE_FOLDER          OneDrive folder path for backups (default "MonFreight Backups")
+BACKUP_TIME_UTC          "HH:MM" daily run time (default "17:00")
+BACKUP_RETENTION_DAYS    default 30
+BACKUP_DIR               local folder (default data/backups)
 """
 from __future__ import annotations
 
@@ -46,6 +48,8 @@ import threading
 import zipfile
 from pathlib import Path
 from typing import Optional
+
+import requests as _requests
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -77,110 +81,127 @@ _lock = threading.Lock()                   # one backup/restore at a time
 
 
 # --------------------------------------------------------------------------
-# Google Drive (service-account, REST v3 — no heavy SDK)
+# OneDrive (Microsoft Graph API — refresh-token / delegated auth)
 # --------------------------------------------------------------------------
-def _drive_folder() -> str:
-    return os.environ.get("GDRIVE_FOLDER_ID", "").strip()
+_OD_TOKEN_URL  = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+_OD_GRAPH      = "https://graph.microsoft.com/v1.0/me/drive"
+_OD_GRAPH_ITEM = "https://graph.microsoft.com/v1.0/me/drive/items"
+
+
+def _od_folder() -> str:
+    return os.environ.get("ONEDRIVE_FOLDER", "MonFreight Backups").strip()
 
 
 def drive_configured() -> bool:
-    return bool(_drive_folder() and (
-        os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON")
-        or os.environ.get("GDRIVE_SERVICE_ACCOUNT_FILE")))
+    return all(os.environ.get(k) for k in (
+        "ONEDRIVE_CLIENT_ID", "ONEDRIVE_CLIENT_SECRET", "ONEDRIVE_REFRESH_TOKEN"))
 
 
-def _drive_session():
-    """AuthorizedSession for the Drive API, or None if not configured."""
-    if not drive_configured():
-        return None
+def _od_access_token() -> Optional[str]:
+    """Exchange the stored refresh token for a short-lived access token.
+    If the server returns a new refresh token, it is stored in-memory so the
+    next call succeeds without needing to re-run the setup flow."""
     try:
-        from google.oauth2 import service_account
-        from google.auth.transport.requests import AuthorizedSession
-        scopes = ["https://www.googleapis.com/auth/drive"]
-        raw = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON", "")
-        if raw:
-            creds = service_account.Credentials.from_service_account_info(
-                json.loads(raw), scopes=scopes)
-        else:
-            creds = service_account.Credentials.from_service_account_file(
-                os.environ["GDRIVE_SERVICE_ACCOUNT_FILE"], scopes=scopes)
-        return AuthorizedSession(creds)
+        resp = _requests.post(_OD_TOKEN_URL, data={
+            "grant_type":    "refresh_token",
+            "client_id":     os.environ["ONEDRIVE_CLIENT_ID"],
+            "client_secret": os.environ["ONEDRIVE_CLIENT_SECRET"],
+            "refresh_token": os.environ["ONEDRIVE_REFRESH_TOKEN"],
+            "scope":         "https://graph.microsoft.com/Files.ReadWrite offline_access",
+        }, timeout=30)
+        if resp.status_code >= 300:
+            log.error("OneDrive token refresh failed (%s): %s",
+                      resp.status_code, resp.text[:200])
+            return None
+        data = resp.json()
+        # Microsoft may rotate the refresh token — keep the latest one in memory
+        if "refresh_token" in data:
+            os.environ["ONEDRIVE_REFRESH_TOKEN"] = data["refresh_token"]
+        return data.get("access_token")
     except Exception as e:                            # noqa: BLE001
-        log.error("Google Drive auth failed: %s", e)
+        log.error("OneDrive token error: %s", e)
         return None
+
+
+def _od_headers() -> Optional[dict]:
+    token = _od_access_token()
+    return {"Authorization": f"Bearer {token}"} if token else None
 
 
 def _drive_upload(path: Path) -> Optional[str]:
-    sess = _drive_session()
-    if not sess:
+    hdrs = _od_headers()
+    if not hdrs:
         return None
-    meta = json.dumps({"name": path.name, "parents": [_drive_folder()]})
-    body = io.BytesIO()
-    boundary = "mf_backup_boundary"
-    body.write(f"--{boundary}\r\nContent-Type: application/json; "
-               f"charset=UTF-8\r\n\r\n{meta}\r\n".encode())
-    body.write(f"--{boundary}\r\nContent-Type: application/zip\r\n\r\n".encode())
-    body.write(path.read_bytes())
-    body.write(f"\r\n--{boundary}--".encode())
-    r = sess.post(
-        "https://www.googleapis.com/upload/drive/v3/files"
-        "?uploadType=multipart&supportsAllDrives=true",
-        headers={"Content-Type": f"multipart/related; boundary={boundary}"},
-        data=body.getvalue(), timeout=120)
+    folder = _od_folder()
+    # Graph simple upload (≤4 MB); backups are typically well under that
+    url = f"{_OD_GRAPH}/root:/{folder}/{path.name}:/content"
+    hdrs["Content-Type"] = "application/octet-stream"
+    r = _requests.put(url, headers=hdrs, data=path.read_bytes(), timeout=120)
     if r.status_code >= 300:
-        log.error("Drive upload failed (%s): %s", r.status_code, r.text[:300])
+        log.error("OneDrive upload failed (%s): %s", r.status_code, r.text[:300])
         return None
-    file_id = r.json().get("id")
-    log.info("Backup uploaded to Google Drive: %s (id=%s)", path.name, file_id)
-    return file_id
+    item_id = r.json().get("id")
+    log.info("Backup uploaded to OneDrive: %s (id=%s)", path.name, item_id)
+    return item_id
 
 
 def _drive_list() -> list[dict]:
-    sess = _drive_session()
-    if not sess:
+    hdrs = _od_headers()
+    if not hdrs:
         return []
-    q = (f"'{_drive_folder()}' in parents and trashed=false "
-         f"and name contains 'monfreight_backup_'")
-    r = sess.get("https://www.googleapis.com/drive/v3/files",
-                 params={"q": q, "pageSize": 200,
-                         "fields": "files(id,name,size,createdTime)",
-                         "supportsAllDrives": "true",
-                         "includeItemsFromAllDrives": "true"},
-                 timeout=30)
+    folder = _od_folder()
+    url = f"{_OD_GRAPH}/root:/{folder}:/children"
+    r = _requests.get(url, headers=hdrs, params={"$top": "200"}, timeout=30)
+    if r.status_code == 404:
+        return []   # folder doesn't exist yet — no backups uploaded
     if r.status_code >= 300:
-        log.error("Drive list failed (%s): %s", r.status_code, r.text[:300])
+        log.error("OneDrive list failed (%s): %s", r.status_code, r.text[:300])
         return []
-    return r.json().get("files", [])
+    return [
+        {"id": f["id"], "name": f["name"],
+         "size": f.get("size", 0),
+         "createdTime": f.get("createdDateTime", "")}
+        for f in r.json().get("value", [])
+        if "monfreight_backup_" in f.get("name", "")
+    ]
 
 
 def _drive_download(file_id: str, dest: Path) -> bool:
-    sess = _drive_session()
-    if not sess:
+    hdrs = _od_headers()
+    if not hdrs:
         return False
-    r = sess.get(f"https://www.googleapis.com/drive/v3/files/{file_id}"
-                 f"?alt=media&supportsAllDrives=true", timeout=300)
+    # Fetch the item metadata to get the pre-authenticated download URL
+    r = _requests.get(f"{_OD_GRAPH_ITEM}/{file_id}", headers=hdrs, timeout=30)
     if r.status_code >= 300:
-        log.error("Drive download failed (%s)", r.status_code)
+        log.error("OneDrive item fetch failed (%s)", r.status_code)
         return False
-    dest.write_bytes(r.content)
+    download_url = r.json().get("@microsoft.graph.downloadUrl")
+    if not download_url:
+        log.error("OneDrive: no downloadUrl in item response")
+        return False
+    r2 = _requests.get(download_url, timeout=300)
+    if r2.status_code >= 300:
+        log.error("OneDrive download failed (%s)", r2.status_code)
+        return False
+    dest.write_bytes(r2.content)
     return True
 
 
 def _drive_prune() -> None:
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=RETENTION_DAYS)
-    sess = _drive_session()
-    if not sess:
+    hdrs = _od_headers()
+    if not hdrs:
         return
     for f in _drive_list():
         try:
             created = dt.datetime.fromisoformat(
                 f["createdTime"].replace("Z", "+00:00")).replace(tzinfo=None)
             if created < cutoff:
-                sess.delete(f"https://www.googleapis.com/drive/v3/files/{f['id']}"
-                            f"?supportsAllDrives=true", timeout=30)
-                log.info("Pruned old Drive backup: %s", f["name"])
+                _requests.delete(f"{_OD_GRAPH_ITEM}/{f['id']}",
+                                 headers=hdrs, timeout=30)
+                log.info("Pruned old OneDrive backup: %s", f["name"])
         except Exception as e:                        # noqa: BLE001
-            log.warning("Drive prune skipped %s: %s", f.get("name"), e)
+            log.warning("OneDrive prune skipped %s: %s", f.get("name"), e)
 
 
 # --------------------------------------------------------------------------
