@@ -2006,3 +2006,44 @@ rebuildLabelPanelLinks?.();
 
 renderTable();
 // Dashboard loaded by switchPanel on init
+
+// ============================================================
+// BACKGROUND POLL — refresh shipments every 15 seconds so
+// changes made by other users appear without a manual reload.
+// Skipped when a modal is open or the user is not on the
+// Shipments panel (avoids disrupting active editing).
+// ============================================================
+(function startPolling() {
+  const POLL_MS = 15_000;
+
+  async function _pollShipments() {
+    // Only poll on the Shipments panel
+    const activePanel = sessionStorage.getItem("mf_panel") || "dashboard";
+    if (activePanel !== "shipments") return;
+
+    // Skip if any modal/dialog is currently visible
+    const modalOpen = $$(".modal, .dialog, [role='dialog']")
+      .some(el => !el.classList.contains("hidden") &&
+                  el.offsetParent !== null);
+    if (modalOpen) return;
+
+    try {
+      const params = new URLSearchParams();
+      if (_filterStart) params.set("start", _filterStart);
+      if (_filterEnd)   params.set("end",   _filterEnd);
+      const url = "/api/shipments" + (params.toString() ? "?" + params : "");
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const fresh = await res.json();
+      // Only re-render if data actually changed
+      if (JSON.stringify(fresh) !== JSON.stringify(shipments)) {
+        shipments = fresh;
+        renderTable();
+      }
+    } catch (_) {
+      // Silently ignore network errors during polling
+    }
+  }
+
+  setInterval(_pollShipments, POLL_MS);
+})();

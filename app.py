@@ -95,7 +95,7 @@ class Shipment(Base):
     notes = Column(String, default="")
     link_group = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    created_at = Column(DateTime, default=dt.datetime.now)
 
 
 Base.metadata.create_all(engine)

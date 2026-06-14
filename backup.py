@@ -188,14 +188,16 @@ def _drive_download(file_id: str, dest: Path) -> bool:
 
 
 def _drive_prune() -> None:
-    cutoff = dt.datetime.utcnow() - dt.timedelta(days=RETENTION_DAYS)
+    cutoff = dt.datetime.now() - dt.timedelta(days=RETENTION_DAYS)
     hdrs = _od_headers()
     if not hdrs:
         return
     for f in _drive_list():
         try:
-            created = dt.datetime.fromisoformat(
-                f["createdTime"].replace("Z", "+00:00")).replace(tzinfo=None)
+            # OneDrive timestamps are UTC — convert to local time for comparison
+            created_utc = dt.datetime.fromisoformat(
+                f["createdTime"].replace("Z", "+00:00"))
+            created = created_utc.astimezone().replace(tzinfo=None)
             if created < cutoff:
                 _requests.delete(f"{_OD_GRAPH_ITEM}/{f['id']}",
                                  headers=hdrs, timeout=30)
@@ -383,7 +385,7 @@ def create_backup(reason: str = "auto", upload: bool = True) -> dict:
     - manifest.json   — names + SHA-256 checksums of all entries
     """
     with _lock:
-        now = dt.datetime.utcnow()
+        now = dt.datetime.now()
         suffix = "_pre-restore" if reason == "pre-restore" else ""
         name = f"monfreight_backup_{now:%Y-%m-%d_%H%M%S}{suffix}.zip"
         path = BACKUP_DIR / name
@@ -432,9 +434,9 @@ def create_backup(reason: str = "auto", upload: bool = True) -> dict:
 
 
 def _prune_local() -> None:
-    cutoff = dt.datetime.utcnow() - dt.timedelta(days=RETENTION_DAYS)
+    cutoff = dt.datetime.now() - dt.timedelta(days=RETENTION_DAYS)
     for p in BACKUP_DIR.glob("monfreight_backup_*.zip"):
-        if dt.datetime.utcfromtimestamp(p.stat().st_mtime) < cutoff:
+        if dt.datetime.fromtimestamp(p.stat().st_mtime) < cutoff:
             p.unlink(missing_ok=True)
             log.info("Pruned old local backup: %s", p.name)
 

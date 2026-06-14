@@ -30,7 +30,7 @@ class ActivityLog(LogBase):
     action    = Column(String, nullable=False, index=True)
     details   = Column(String, default="")
     ip        = Column(String, default="")
-    timestamp = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=dt.datetime.now, index=True)
 
 
 def init_activity_log(engine) -> None:
@@ -54,7 +54,7 @@ def log_activity(username: str, action: str,
                 action=action,
                 details=details[:2000],   # cap detail length
                 ip=ip,
-                timestamp=dt.datetime.utcnow(),
+                timestamp=dt.datetime.now(),
             ))
             s.commit()
     except Exception as exc:
