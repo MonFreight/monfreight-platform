@@ -383,6 +383,26 @@ function updateSelectionUI() {
   const someSel = visibleIds.some(i => selectedIds.has(i));
   sa.checked = allSel;
   sa.indeterminate = !allSel && someSel;
+  updateSelectionTotals();
+}
+
+function updateSelectionTotals() {
+  const bar = $("#selectionBar");
+  if (!bar) return;
+  const n = selectedIds.size;
+  if (n === 0) { bar.classList.add("hidden"); return; }
+  const sel = shipments.filter(r => selectedIds.has(r.id));
+  const weight  = sel.reduce((a, r) => a + Number(r.weight   || 0), 0);
+  const freight = sel.reduce((a, r) => a + Number(r.total_aud || 0), 0);
+  const paid    = sel.filter(r => r.paid).reduce((a, r) => a + Number(r.total_aud || 0), 0);
+  bar.classList.remove("hidden");
+  bar.innerHTML =
+    `<strong>${n} row${n === 1 ? "" : "s"} selected</strong>` +
+    ` &nbsp;·&nbsp; Weight: <strong>${fmt2(weight)} kg</strong>` +
+    ` &nbsp;·&nbsp; Freight: <strong>${fmtMoney(freight)}</strong>` +
+    ` &nbsp;·&nbsp; Paid: <strong>${fmtMoney(paid)}</strong>` +
+    ` &nbsp;·&nbsp; Outstanding: <strong>${fmtMoney(freight - paid)}</strong>` +
+    ` <button class="btn ghost small" style="margin-left:auto" onclick="selectedIds.clear();renderTable();">✕ Clear</button>`;
 }
 
 function syncLabelsPanel() { updateSelectionUI(); }
@@ -767,6 +787,7 @@ tableBody.addEventListener("click", async e => {
   const tr = e.target.closest("tr"); if (!tr) return;
   const id = +tr.dataset.id;
 
+  // Paid pill toggle
   const pill = e.target.closest(".paid-pill");
   if (pill) {
     const ship = shipments.find(s => s.id === id);
@@ -776,37 +797,64 @@ tableBody.addEventListener("click", async e => {
     return;
   }
 
+  // Action buttons
   const btn = e.target.closest("button[data-act]");
-  if (!btn) return;
-  const ship = shipments.find(s => s.id === id);
-  if (!ship) return;
-
-  if (btn.dataset.act === "print") {
-    const scope = `BOX ${ship.box_number} (${ship.mf_number})`;
-    const choice = await chooseLabelTemplate(scope);
-    if (!choice) return;
-    if (choice === "html") window.open(`/shipments/${ship.id}/label`, "_blank");
-    else printXlsxInBrowser(`/shipments/${ship.id}/label.xlsx`);
+  if (btn) {
+    const ship = shipments.find(s => s.id === id);
+    if (!ship) return;
+    if (btn.dataset.act === "print") {
+      const scope = `BOX ${ship.box_number} (${ship.mf_number})`;
+      const choice = await chooseLabelTemplate(scope);
+      if (!choice) return;
+      if (choice === "html") window.open(`/shipments/${ship.id}/label`, "_blank");
+      else printXlsxInBrowser(`/shipments/${ship.id}/label.xlsx`);
+      return;
+    }
+    if (btn.dataset.act === "edit") { openEdit(ship); return; }
+    if (btn.dataset.act === "delete") {
+      const ok = await customConfirm({
+        title: "Delete Shipment",
+        message: `Permanently delete BOX ${ship.box_number} (${ship.mf_number}) from ${ship.batch_date}? This cannot be undone.`,
+        okLabel: "Delete",
+      });
+      if (!ok) return;
+      const res = await fetch(`/api/shipments/${id}`, { method: "DELETE" });
+      if (res.ok) { shipments = shipments.filter(s => s.id !== id); renderTable(); toast("Shipment deleted."); }
+      else toast("Delete failed.", "err");
+    }
     return;
   }
-  if (btn.dataset.act === "edit") { openEdit(ship); return; }
-  if (btn.dataset.act === "delete") {
-    const ok = await customConfirm({
-      title: "Delete Shipment",
-      message: `Permanently delete BOX ${ship.box_number} (${ship.mf_number}) from ${ship.batch_date}? This cannot be undone.`,
-      okLabel: "Delete",
-    });
-    if (!ok) return;
-    const res = await fetch(`/api/shipments/${id}`, { method: "DELETE" });
-    if (res.ok) { shipments = shipments.filter(s => s.id !== id); renderTable(); toast("Shipment deleted."); }
-    else toast("Delete failed.", "err");
-  }
+
+  // Checkbox itself — handled by the change event; skip here
+  if (e.target.matches("input.row-cb")) return;
+
+  // Download link — let browser handle
+  if (e.target.closest("a")) return;
+
+  // Single click anywhere else on the row → toggle selection
+  const cb = tr.querySelector(".row-cb");
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  if (cb.checked) selectedIds.add(id);
+  else            selectedIds.delete(id);
+  tr.classList.toggle("selected", cb.checked);
+  updateSelectionUI();
 });
 
 tableBody.addEventListener("dblclick", e => {
+  const tr = e.target.closest("tr"); if (!tr) return;
+  const id = +tr.dataset.id;
+  const ship = shipments.find(s => s.id === id); if (!ship) return;
+
+  // On editable cell → inline edit (existing behaviour)
   const ed = e.target.closest(".ed");
-  if (!ed || ed.classList.contains("editing")) return;
-  startInlineEdit(ed);
+  if (ed && !ed.classList.contains("editing")) { startInlineEdit(ed); return; }
+
+  // On button / link / pill / checkbox → ignore
+  if (e.target.closest("button, a, input, .paid-pill, .link-badge")) return;
+
+  // Double-click anywhere else on row → open full edit modal
+  openEdit(ship);
 });
 
 function startInlineEdit(ed) {
@@ -2008,11 +2056,34 @@ renderTable();
 // Dashboard loaded by switchPanel on init
 
 // ============================================================
+// BATCH STATS — fetch totals for ALL records matching the
+// current filter (all pages) and populate the stats bar.
+// ============================================================
+async function loadBatchStats() {
+  const params = new URLSearchParams();
+  if (window.FILTER_START) params.set("start", window.FILTER_START);
+  if (window.FILTER_END)   params.set("end",   window.FILTER_END);
+  if (window.SEARCH_Q)     params.set("q",     window.SEARCH_Q);
+  try {
+    const res = await fetch("/api/stats" + (params.toString() ? "?" + params : ""));
+    if (!res.ok) return;
+    const d = await res.json();
+    $("#statBoxes").textContent  = fmt0(d.total);
+    $("#statWeight").textContent = fmt2(d.weight);
+    $("#statValue").textContent  = fmtMoney(d.declared_value);
+    $("#statPrice").textContent  = fmtMoney(d.freight);
+    $("#statPaid").textContent   = fmtMoney(d.paid);
+    $("#statUnpaid").textContent = fmtMoney(d.outstanding);
+    $("#rowCount").textContent   = `${d.total} shipment${d.total === 1 ? "" : "s"}`;
+  } catch (_) {}
+}
+loadBatchStats();
+
+// ============================================================
 // BACKGROUND POLL — refresh shipments every 15 seconds so
 // changes made by other users appear without a manual reload.
-// Preserves current page, search query, and date filters.
-// Skipped when a modal is open or the user is not on the
-// Shipments panel (avoids disrupting active editing).
+// Always mirrors the exact page / filter / search the user
+// is on so the view is never reset to page 1.
 // ============================================================
 (function startPolling() {
   const POLL_MS = 15_000;
@@ -2029,14 +2100,13 @@ renderTable();
     if (modalOpen) return;
 
     try {
-      // Mirror the exact page/filter/search the user is currently viewing
+      // Always pass page so page 1 also gets only its 15 rows (not all records)
       const params = new URLSearchParams();
       if (window.FILTER_START) params.set("start", window.FILTER_START);
       if (window.FILTER_END)   params.set("end",   window.FILTER_END);
       if (window.SEARCH_Q)     params.set("q",     window.SEARCH_Q);
-      if (window.PAGE > 1)     params.set("page",  window.PAGE);
-      const url = "/api/shipments" + (params.toString() ? "?" + params : "");
-      const res = await fetch(url);
+      params.set("page", window.PAGE || 1);
+      const res = await fetch("/api/shipments?" + params);
       if (!res.ok) return;
       const fresh = await res.json();
       // Only re-render if data actually changed

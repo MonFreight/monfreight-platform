@@ -547,6 +547,7 @@ main {
 .dataTable th.sortable::after      { content: ""; opacity: .3; margin-left: 4px; font-size: 10px; }
 .dataTable th.sortable.asc::after  { content: "▲"; opacity: 1; color: var(--brand); }
 .dataTable th.sortable.desc::after { content: "▼"; opacity: 1; color: var(--brand); }
+.dataTable tbody tr          { cursor: pointer; }
 .dataTable tbody tr:hover    { background: var(--brand-pale); }
 .dataTable tbody tr.paid     { background: var(--paid-bg); }
 .dataTable tbody tr.paid:hover { background: #bbf7d0; }

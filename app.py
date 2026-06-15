@@ -507,6 +507,24 @@ def index(request: Request,
     })
 
 
+@app.get("/api/stats")
+def shipment_stats(start: Optional[str] = None, end: Optional[str] = None,
+                   q: Optional[str] = None):
+    sd = dt.date.fromisoformat(start) if start else None
+    ed = dt.date.fromisoformat(end) if end else None
+    with Session(engine) as s:
+        rows = all_shipments(s, sd, ed)
+        if q:
+            rows = _filter_shipments(rows, q)
+    total   = len(rows)
+    weight  = sum(float(r.weight        or 0) for r in rows)
+    value   = sum(float(r.declared_value or 0) for r in rows)
+    freight = sum(float(r.total_aud     or 0) for r in rows)
+    paid    = sum(float(r.total_aud     or 0) for r in rows if r.paid)
+    return {"total": total, "weight": weight, "declared_value": value,
+            "freight": freight, "paid": paid, "outstanding": freight - paid}
+
+
 @app.get("/api/shipments")
 def list_shipments(start: Optional[str] = None, end: Optional[str] = None,
                    q: Optional[str] = None, page: int = 0):

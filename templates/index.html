@@ -165,11 +165,11 @@
     </div>
   </div>
 
-  <!-- Stats bar -->
+  <!-- Stats bar (batch totals — all pages) -->
   <div class="stats">
     <div class="stat">
-      <div class="stat-num" id="statBoxes">0</div>
-      <div class="stat-label">Boxes Shown</div>
+      <div class="stat-num" id="statBoxes">{{ total_count }}</div>
+      <div class="stat-label">Total Boxes</div>
     </div>
     <div class="stat">
       <div class="stat-num" id="statWeight">0</div>
@@ -191,6 +191,12 @@
       <div class="stat-num" id="statUnpaid">$0</div>
       <div class="stat-label">Outstanding (AU$)</div>
     </div>
+  </div>
+
+  <!-- Selection summary bar (visible when rows are selected) -->
+  <div id="selectionBar" class="hidden" style="
+    background:var(--brand-soft);border:1px solid var(--brand);border-radius:6px;
+    padding:8px 14px;margin:6px 0;font-size:13px;display:flex;align-items:center;gap:16px;">
   </div>
 
   <!-- New shipment entry form -->
