@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>Mon Freight — Logistics Management</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v={{ _v }}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/themes/airbnb.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -1096,6 +1096,6 @@
   window.FILTER_START  = {{ start_d | tojson | safe }};
   window.FILTER_END    = {{ end_d   | tojson | safe }};
 </script>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ _v }}"></script>
 </body>
 </html>

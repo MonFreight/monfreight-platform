@@ -403,6 +403,11 @@ app = FastAPI(title="Mon Freight CDP")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+# Cache-busting version string — changes on every deploy so browsers
+# always load the latest CSS/JS rather than a cached copy.
+_STATIC_VERSION = str(int(dt.datetime.now().timestamp()))
+templates.env.globals["_v"] = _STATIC_VERSION
+
 # --- security & operations add-ons --------------------------------------
 # auth: login + SMS verification + session protection for every page/API
 # backup: automatic daily backups, Google Drive sync, restore
