@@ -193,12 +193,6 @@
     </div>
   </div>
 
-  <!-- Selection summary bar (visible when rows are selected) -->
-  <div id="selectionBar" class="hidden" style="
-    background:var(--brand-soft);border:1px solid var(--brand);border-radius:6px;
-    padding:8px 14px;margin:6px 0;font-size:13px;display:flex;align-items:center;gap:16px;">
-  </div>
-
   <!-- New shipment entry form -->
   <section class="card entry">
     <div class="entry-title">
@@ -383,6 +377,12 @@
       </table>
     </div>
     <p class="empty hidden" id="emptyMsg">No shipments match your current filters.</p>
+
+    <!-- Selection totals — appears when rows are selected -->
+    <div id="selectionBar" class="hidden" style="
+      background:var(--brand-soft);border:1px solid var(--brand);border-radius:6px;
+      padding:8px 14px;margin:8px 0 4px;font-size:13px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    </div>
 
     {% if pages > 1 %}
     <nav class="pager">
