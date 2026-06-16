@@ -118,7 +118,7 @@ def api_list_logs(request: Request,
                 "action": r.action,
                 "details": r.details or "",
                 "ip": r.ip or "",
-                "timestamp": (r.timestamp.isoformat() + "Z") if r.timestamp else None,
+                "timestamp": r.timestamp.strftime("%Y-%m-%d %H:%M") if r.timestamp else None,
             }
             for r in rows
         ],
