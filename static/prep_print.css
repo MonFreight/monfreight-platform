@@ -36,15 +36,15 @@ body {
 .label-page {
   width: 261mm; margin: 0 auto;
   display: flex; flex-wrap: wrap; align-content: flex-start;
-  gap: 3.5mm;
+  gap: 8mm 3.5mm;   /* row-gap (vertical) × column-gap (horizontal) */
   page-break-after: always; break-after: page;
 }
 .label-page:last-child { page-break-after: auto; break-after: auto; }
 
 .olabel {
-  width: 128mm; height: 83mm;
+  width: 128mm; height: 79mm;
   border: 2.2px solid var(--ol-blue); border-radius: 7px;
-  padding: 2.6mm 4mm; overflow: hidden;
+  padding: 2.4mm 4mm; overflow: hidden;
   display: flex; flex-direction: column;
   page-break-inside: avoid; break-inside: avoid;
 }
@@ -57,9 +57,9 @@ body {
 /* Header: logo + company name only */
 .ol-head {
   display: flex; align-items: center; gap: 8px;
-  border-bottom: 2px solid var(--ol-blue); padding-bottom: 3px; margin-bottom: 3px;
+  border-bottom: 2px solid var(--ol-blue); padding-bottom: 2px; margin-bottom: 2px;
 }
-.ol-logo { width: 58px; height: auto; max-height: 40px; object-fit: contain; }
+.ol-logo { width: 56px; height: auto; max-height: 36px; object-fit: contain; }
 .ol-co-name { font-size: 19px; font-weight: 800; color: var(--ol-blue); letter-spacing: .3px; }
 
 /* 3-column body */
@@ -71,7 +71,7 @@ body {
 .ol-pkg-num { font-size: 36px; font-weight: 900; color: var(--ol-ink); line-height: 1; }
 
 /* Column B — shipment info */
-.ol-col-info { display: flex; flex-direction: column; justify-content: center; gap: 2.2mm; }
+.ol-col-info { display: flex; flex-direction: column; justify-content: center; gap: 2mm; }
 .ol-field { display: flex; align-items: flex-start; gap: 6px; }
 .ol-fi { flex: 0 0 auto; }
 .fi-ico { width: 16px; height: 16px; fill: none; stroke: var(--ol-blue);
