@@ -188,13 +188,21 @@
     return p ? `#${p.package_number}` : "—";
   }
 
+  // Outer package number + type, e.g. "#3 Carton" — used in the Assign
+  // Parcels list, shown immediately after each box's weight.
+  function pkgLabelFor(id) {
+    const p = state.packages.find(x => x.id === id);
+    if (!p) return "—";
+    return p.package_type ? `#${p.package_number} ${p.package_type}` : `#${p.package_number}`;
+  }
+
   function renderParcels() {
     const unassigned = state.parcels.filter(p => !p.package_id).length;
     q("#prepUnassignedNote").textContent = unassigned
       ? `${unassigned} unassigned` : "All parcels assigned ✓";
     q("#prepUnassignedNote").className = "muted small" + (unassigned ? " prep-warn-text" : "");
     q("#prepParcelList").innerHTML = state.parcels.map(p => {
-      const assigned = p.package_id ? `<span class="prep-asgn">${pkgNumFor(p.package_id)}</span>` : `<span class="prep-unasgn">unassigned</span>`;
+      const assigned = p.package_id ? `<span class="prep-asgn">${pkgLabelFor(p.package_id)}</span>` : `<span class="prep-unasgn">unassigned</span>`;
       const bat = p.has_battery ? `<span class="prep-bat-dot" title="Battery info detected">🔋</span>` : "";
       return `<label class="prep-parcel ${p.package_id ? "" : "is-unassigned"}">
         <input type="checkbox" class="prep-pcheck" value="${p.id}">
@@ -202,7 +210,7 @@
         <span class="pp-mf">${esc(p.mf_number)}</span>
         <span class="pp-desc">${esc((p.description||"").slice(0,60))}</span>
         <span class="pp-wt">${(p.weight||0)}kg</span>
-        ${bat}${assigned}
+        ${assigned}${bat}
       </label>`;
     }).join("") || `<p class="muted small">No parcels recorded for this batch date.</p>`;
   }
