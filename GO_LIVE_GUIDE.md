@@ -57,9 +57,40 @@ password step, the person picks which number receives the 6-digit code.
    * `TWILIO_FROM` — your Twilio number, e.g. `+61480012345`
 3. Make sure each user's mobile is saved in E.164 format
    (`+61…` Australia, `+976…` Mongolia).
+4. *(Optional)* `TWILIO_SMS_FROM` — a **separate** number for parcel-update
+   SMS to senders (see section 3a). If unset, parcel SMS uses `TWILIO_FROM`.
 
 Cost is roughly US$0.05–0.10 per SMS. Trial accounts can only text verified
 numbers — upgrade before go-live.
+
+## 3a. Sender parcel-update SMS (Send SMS panel)
+
+Admins get a **Send SMS** tab (admin-only) to text parcel updates to the
+**senders** in a chosen batch. It reuses the Twilio account above; the only
+extra (optional) variable is a dedicated sender number:
+
+* `TWILIO_SMS_FROM` — your Twilio number for parcel updates,
+  e.g. `+61480067890`. **Falls back to `TWILIO_FROM`** when not set, so the
+  feature works with a single number too.
+
+How it works:
+
+1. Pick a **Batch Date** → the panel loads every **sender** phone in that
+   batch (receiver numbers are never included).
+2. Australian mobiles are auto-normalised to E.164 (`0412 345 678` →
+   `+61412345678`); non-AU or invalid numbers are flagged and excluded.
+3. Admins can **remove** numbers or **add** extra AU mobiles manually.
+4. Type/edit the message — **English and Mongolian Cyrillic** are both
+   supported (sent as Unicode/UCS-2). A live **preview** shows the exact text
+   and the SMS segment count.
+5. A confirmation prompt ("You are about to send this SMS to N sender(s)…")
+   guards against accidental bulk sends.
+6. Every attempt is saved to **SMS History** (batch date, number, message,
+   sent time, status/error, admin user).
+
+> **Dev mode:** until Twilio is configured, **Send SMS** runs as a dry run —
+> it records each attempt in history with status `dry run` but sends nothing,
+> so the whole flow can be tested safely before go-live.
 
 ## 4. Google Drive setup (cloud backups)
 
@@ -166,7 +197,8 @@ a backup to a separate location (e.g. office computer) **once a week**.
 | `SECRET_KEY` | auto | Cookie signing (auto-generated on Render) |
 | `SESSION_HOURS` | no | Session lifetime, default 12 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_PHONE` | first run | Default admin account |
-| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | go-live | SMS verification codes |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | go-live | SMS verification codes (and parcel SMS if `TWILIO_SMS_FROM` unset) |
+| `TWILIO_SMS_FROM` | no | Dedicated sender number for parcel-update SMS; falls back to `TWILIO_FROM` |
 | `GDRIVE_SERVICE_ACCOUNT_JSON` / `GDRIVE_FOLDER_ID` | recommended | Cloud backup storage |
 | `BACKUP_TIME_UTC` | no | Daily backup time, default `17:00` |
 | `BACKUP_RETENTION_DAYS` | no | Default `30` |

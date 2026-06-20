@@ -414,10 +414,13 @@ templates.env.globals["_v"] = _STATIC_VERSION
 from auth import init_auth                      # noqa: E402
 from backup import init_backup                  # noqa: E402
 from activity_log import init_activity_log, log_activity, router as activity_router  # noqa: E402
+from sms import init_sms, router as sms_router  # noqa: E402
 init_auth(app, engine, templates)
 init_backup(app, engine)
 init_activity_log(engine)
+init_sms(engine)
 app.include_router(activity_router)
+app.include_router(sms_router)
 
 
 @app.get("/api/health")

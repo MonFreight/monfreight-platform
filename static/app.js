@@ -78,6 +78,7 @@ function switchPanel(name) {
   if (name === "reports")   loadReports();
   if (name === "settings")  loadSettings();
   if (name === "activity")  loadActivityPanel();
+  if (name === "sms")       loadSMSPanel();
 
   // Sync the labels panel selection state
   if (name === "labels") syncLabelsPanel();
@@ -2204,4 +2205,325 @@ loadBatchStats();
   }
 
   setInterval(_pollShipments, POLL_MS);
+})();
+
+// ============================================================
+// SEND SMS PANEL (admin only)
+// ============================================================
+let _smsRecipients = [];          // [{name, raw, phone, valid, reason, box, included}]
+let _smsDevMode    = true;
+let _smsHistOffset = 0;
+let _smsHistTotal  = 0;
+const _SMS_HIST_PAGE = 100;
+const _SMS_SEG_LIMIT = 70;        // Unicode (UCS-2) single-segment limit
+
+function _smsHasUnicode(s) {
+  // Any code point above basic GSM range → message is sent as UCS-2.
+  return /[^\x00-\x7F]/.test(s || "");
+}
+
+function _smsSegments(s) {
+  const len = (s || "").length;
+  if (len === 0) return 0;
+  if (_smsHasUnicode(s)) {
+    return len <= 70 ? 1 : Math.ceil(len / 67);   // UCS-2 segmentation
+  }
+  return len <= 160 ? 1 : Math.ceil(len / 153);   // GSM-7 segmentation
+}
+
+async function loadSMSPanel() {
+  if (!CURRENT_USER) await initAuth();
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "admin";
+  $("#smsCard")?.classList.toggle("hidden", !isAdmin);
+  $("#smsNoAccess")?.classList.toggle("hidden", isAdmin);
+  if (!isAdmin) return;
+
+  // Config status badge
+  try {
+    const res = await authFetch("/api/sms/status");
+    if (res.ok) {
+      const d = await res.json();
+      _smsDevMode = !!d.dev_mode;
+      const badge = $("#smsConfigBadge");
+      if (badge) {
+        if (d.configured) {
+          badge.textContent = `Twilio ready · sending from ${d.from}`;
+          badge.style.cssText = "font-size:11px;background:#e6ffed;color:#137333;padding:3px 8px;border-radius:10px;";
+        } else {
+          badge.textContent = "DEV MODE — Twilio not configured (dry run)";
+          badge.style.cssText = "font-size:11px;background:#fff7e6;color:#a6730b;padding:3px 8px;border-radius:10px;";
+        }
+      }
+    }
+  } catch (_) {}
+
+  // Load batch list
+  try {
+    const res = await authFetch("/api/sms/batches");
+    const sel = $("#smsBatchSelect");
+    if (res.ok && sel) {
+      const d = await res.json();
+      if (!d.batches || d.batches.length === 0) {
+        sel.innerHTML = `<option value="">No batches found</option>`;
+        $("#smsLoadBtn").disabled = true;
+      } else {
+        sel.innerHTML = `<option value="">Select a batch date…</option>` +
+          d.batches.map(b =>
+            `<option value="${b.date}">${b.date} — ${b.shipments} shipment${b.shipments === 1 ? "" : "s"}</option>`
+          ).join("");
+      }
+    }
+  } catch (_) {}
+
+  loadSMSHistory(0);
+}
+
+$("#smsBatchSelect")?.addEventListener("change", e => {
+  $("#smsLoadBtn").disabled = !e.target.value;
+});
+
+$("#smsLoadBtn")?.addEventListener("click", async () => {
+  const date = $("#smsBatchSelect").value;
+  if (!date) return;
+  $("#smsRecipSummary").textContent = "Loading senders…";
+  try {
+    const res = await authFetch(`/api/sms/recipients?date=${encodeURIComponent(date)}`);
+    if (!res.ok) { $("#smsRecipSummary").textContent = "Failed to load."; return; }
+    const d = await res.json();
+    _smsRecipients = (d.recipients || []).map(r => ({ ...r, included: r.valid }));
+    $("#smsRecipSummary").textContent =
+      `${d.total} sender${d.total === 1 ? "" : "s"} found — ${d.valid} valid AU mobile${d.valid === 1 ? "" : "s"}` +
+      (d.invalid ? `, ${d.invalid} flagged` : "");
+    $("#smsRecipientsCard").classList.remove("hidden");
+    $("#smsMessageCard").classList.remove("hidden");
+    $("#smsResultCard").classList.add("hidden");
+    renderSMSRecipients();
+    updateSMSPreview();
+  } catch (_) {
+    $("#smsRecipSummary").textContent = "Error loading senders.";
+  }
+});
+
+function _smsStatusPill(r) {
+  if (r.valid) return `<span style="color:#137333;font-weight:600;">✓ AU mobile</span>`;
+  return `<span style="color:#b91c1c;" title="${escapeAttr(r.reason || "")}">⚠ ${escapeHtml(r.reason || "invalid")}</span>`;
+}
+
+function renderSMSRecipients() {
+  const body = $("#smsRecipBody");
+  if (!body) return;
+  if (_smsRecipients.length === 0) {
+    body.innerHTML = `<tr><td colspan="5" class="muted small" style="padding:14px;text-align:center;">No senders in this batch.</td></tr>`;
+  } else {
+    body.innerHTML = _smsRecipients.map((r, i) => `
+      <tr style="${r.included ? "" : "opacity:.45;"}">
+        <td style="text-align:center;">
+          <input type="checkbox" data-sms-idx="${i}" ${r.included ? "checked" : ""}
+                 ${r.valid ? "" : "disabled"} title="${r.valid ? "Include / remove" : "Cannot send to an invalid number"}">
+        </td>
+        <td>${escapeHtml(r.name || "—")}</td>
+        <td style="font-family:monospace;">${escapeHtml(r.phone || "—")}</td>
+        <td class="muted small" style="font-family:monospace;">${escapeHtml(r.raw || "")}</td>
+        <td class="small">${_smsStatusPill(r)}</td>
+      </tr>`).join("");
+  }
+  body.querySelectorAll("input[data-sms-idx]").forEach(cb => {
+    cb.addEventListener("change", e => {
+      const idx = +e.target.dataset.smsIdx;
+      _smsRecipients[idx].included = e.target.checked;
+      renderSMSRecipients();
+      updateSMSPreview();
+    });
+  });
+  const included = _smsRecipients.filter(r => r.included && r.valid).length;
+  $("#smsRecipCount").textContent = `${included} selected to send`;
+  updateSMSPreview();
+}
+
+// Add a number manually
+$("#smsAddBtn")?.addEventListener("click", async () => {
+  const input = $("#smsAddPhone");
+  const raw = (input.value || "").trim();
+  const msg = $("#smsAddMsg");
+  if (!raw) return;
+  try {
+    const res = await authFetch("/api/sms/validate-number", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: raw }),
+    });
+    const d = await res.json();
+    if (!d.valid) {
+      msg.textContent = `⚠ ${d.reason || "Not a valid AU mobile"}`;
+      msg.style.color = "#b91c1c";
+      return;
+    }
+    if (_smsRecipients.some(r => r.phone === d.phone)) {
+      msg.textContent = "Already in the list.";
+      msg.style.color = "#a6730b";
+      return;
+    }
+    _smsRecipients.push({ name: "(added manually)", raw, phone: d.phone,
+                          valid: true, reason: "ok", box: null, included: true });
+    input.value = "";
+    msg.textContent = `Added ${d.phone}`;
+    msg.style.color = "#137333";
+    renderSMSRecipients();
+  } catch (_) {
+    msg.textContent = "Error validating number.";
+    msg.style.color = "#b91c1c";
+  }
+});
+$("#smsAddPhone")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); $("#smsAddBtn").click(); }
+});
+
+// Message editor → live preview
+$("#smsMessage")?.addEventListener("input", updateSMSPreview);
+
+function updateSMSPreview() {
+  const text = $("#smsMessage")?.value || "";
+  const preview = $("#smsPreview");
+  if (preview) preview.textContent = text || "(your message preview appears here)";
+  const included = _smsRecipients.filter(r => r.included && r.valid).length;
+  const segs = _smsSegments(text);
+  const enc = _smsHasUnicode(text) ? "Unicode (Mongolian/Cyrillic OK)" : "GSM-7";
+  const meta = $("#smsMeta");
+  if (meta) {
+    meta.textContent = text
+      ? `${text.length} characters · ${segs} SMS segment${segs === 1 ? "" : "s"} · ${enc}`
+      : "";
+  }
+  const summary = $("#smsSendSummary");
+  if (summary) summary.textContent = `${included} recipient${included === 1 ? "" : "s"} selected`;
+  const btn = $("#smsSendBtn");
+  if (btn) btn.disabled = !(text.trim() && included > 0);
+}
+
+// Send → confirmation modal
+$("#smsSendBtn")?.addEventListener("click", () => {
+  const included = _smsRecipients.filter(r => r.included && r.valid);
+  if (included.length === 0 || !($("#smsMessage").value || "").trim()) return;
+  $("#smsConfirmText").innerHTML =
+    `You are about to send this SMS to <strong>${included.length}</strong> ` +
+    `sender${included.length === 1 ? "" : "s"}. Are you sure?`;
+  $("#smsConfirmDevNote").classList.toggle("hidden", !_smsDevMode);
+  $("#smsConfirmModal").classList.remove("hidden");
+});
+
+function _closeSMSConfirm() { $("#smsConfirmModal")?.classList.add("hidden"); }
+$("#smsConfirmClose")?.addEventListener("click", _closeSMSConfirm);
+$("#smsConfirmCancel")?.addEventListener("click", _closeSMSConfirm);
+
+$("#smsConfirmSend")?.addEventListener("click", async () => {
+  const included = _smsRecipients.filter(r => r.included && r.valid);
+  const message = ($("#smsMessage").value || "").trim();
+  const date = $("#smsBatchSelect").value || null;
+  if (included.length === 0 || !message) { _closeSMSConfirm(); return; }
+
+  const sendBtn = $("#smsConfirmSend");
+  sendBtn.disabled = true;
+  sendBtn.textContent = "Sending…";
+  try {
+    const res = await authFetch("/api/sms/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batch_date: date, message,
+                             recipients: included.map(r => r.phone) }),
+    });
+    const d = await res.json();
+    _closeSMSConfirm();
+    renderSMSResults(d);
+    loadSMSHistory(0);
+  } catch (_) {
+    _closeSMSConfirm();
+    alert("Failed to send SMS. Please try again.");
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = "Yes, send";
+  }
+});
+
+function renderSMSResults(d) {
+  const card = $("#smsResultCard");
+  const body = $("#smsResultBody");
+  if (!card || !body) return;
+  card.classList.remove("hidden");
+  const tag = d.dev_mode ? ` <span style="color:#a6730b;">(dry run — Twilio not configured)</span>` : "";
+  const rows = (d.results || []).map(r => {
+    let color = "#137333", label = r.status;
+    if (r.status === "failed" || r.status === "rejected") { color = "#b91c1c"; }
+    if (r.status === "dev") { color = "#a6730b"; label = "dry run"; }
+    return `<tr>
+      <td style="font-family:monospace;">${escapeHtml(r.phone)}</td>
+      <td style="color:${color};font-weight:600;">${escapeHtml(label)}</td>
+      <td class="muted small">${escapeHtml(r.error || "")}</td>
+    </tr>`;
+  }).join("");
+  body.innerHTML = `
+    <p style="font-size:15px;margin:0 0 10px;">
+      <strong style="color:#137333;">${d.sent}</strong> sent ·
+      <strong style="color:#b91c1c;">${d.failed}</strong> failed ·
+      <strong>${d.rejected}</strong> rejected${tag}
+    </p>
+    <div class="rowscroll" style="max-height:260px;">
+      <table class="dataTable" style="table-layout:auto;">
+        <thead><tr><th>Number</th><th style="width:110px;">Result</th><th>Detail</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// History
+async function loadSMSHistory(offset = 0) {
+  const body = $("#smsHistoryBody");
+  if (!body) return;
+  try {
+    const res = await authFetch(`/api/sms/history?limit=${_SMS_HIST_PAGE}&offset=${offset}`);
+    if (!res.ok) { body.innerHTML = `<tr><td colspan="6" class="muted">Failed to load.</td></tr>`; return; }
+    const d = await res.json();
+    _smsHistTotal = d.total || 0;
+    _smsHistOffset = offset;
+    if (!d.history || d.history.length === 0) {
+      body.innerHTML = `<tr><td colspan="6" class="muted small" style="padding:16px;text-align:center;">No SMS history yet.</td></tr>`;
+    } else {
+      body.innerHTML = d.history.map(r => {
+        let color = "#137333";
+        if (r.status === "failed" || r.status === "rejected") color = "#b91c1c";
+        if (r.status === "dev") color = "#a6730b";
+        const st = r.status === "dev" ? "dry run" : r.status;
+        return `<tr>
+          <td class="small" style="white-space:nowrap;">${escapeHtml(r.sent_at)}</td>
+          <td class="small">${escapeHtml(r.batch_date || "—")}</td>
+          <td class="small" style="font-family:monospace;">${escapeHtml(r.phone)}</td>
+          <td class="small" style="color:var(--ink-soft);">${escapeHtml(r.message || "")}${r.error ? `<br><span style="color:#b91c1c;">${escapeHtml(r.error)}</span>` : ""}</td>
+          <td class="small" style="color:${color};font-weight:600;">${escapeHtml(st)}</td>
+          <td class="small">${escapeHtml(r.admin_user || "")}</td>
+        </tr>`;
+      }).join("");
+    }
+    const shown = Math.min(offset + _SMS_HIST_PAGE, _smsHistTotal);
+    $("#smsHistoryFooter").textContent =
+      _smsHistTotal ? `Showing ${offset + 1}–${shown} of ${_smsHistTotal}` : "";
+    $("#smsHistoryPrev").disabled = offset === 0;
+    $("#smsHistoryNext").disabled = offset + _SMS_HIST_PAGE >= _smsHistTotal;
+  } catch (_) {
+    body.innerHTML = `<tr><td colspan="6" class="muted">Error loading history.</td></tr>`;
+  }
+}
+$("#smsHistoryRefresh")?.addEventListener("click", () => loadSMSHistory(_smsHistOffset));
+$("#smsHistoryPrev")?.addEventListener("click", () => {
+  if (_smsHistOffset > 0) loadSMSHistory(Math.max(0, _smsHistOffset - _SMS_HIST_PAGE));
+});
+$("#smsHistoryNext")?.addEventListener("click", () => {
+  if (_smsHistOffset + _SMS_HIST_PAGE < _smsHistTotal) loadSMSHistory(_smsHistOffset + _SMS_HIST_PAGE);
+});
+
+// Show the "Send SMS" nav link for admins after auth check
+(async () => {
+  if (!CURRENT_USER) await initAuth();
+  if (CURRENT_USER && CURRENT_USER.role === "admin") {
+    const navLink = $("#navSMS");
+    if (navLink) navLink.style.display = "";
+  }
 })();
