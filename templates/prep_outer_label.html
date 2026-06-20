@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Outer Package Labels</title>
-<link rel="stylesheet" href="/static/prep_print.css?v=5">
+<link rel="stylesheet" href="/static/prep_print.css?v=6">
 <style>
   /* Outer labels print on A4 landscape, 4 labels per page (2 × 2). */
   @page { size: A4 landscape; margin: 9mm; }
@@ -149,7 +149,6 @@
 </section>
 
 {% if loop.index0 % 4 == 3 or loop.last %}
-  <div class="ol-page-note">PLEASE ENSURE ALL MARKS AND LABELS ARE CLEARLY VISIBLE ON THE OUTER PACKAGE</div>
 </div>
 {% endif %}
 {% endfor %}

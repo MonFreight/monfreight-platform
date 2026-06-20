@@ -36,21 +36,17 @@ body {
 .label-page {
   width: 261mm; margin: 0 auto;
   display: flex; flex-wrap: wrap; align-content: flex-start;
-  gap: 8mm 3.5mm;   /* row-gap (vertical) × column-gap (horizontal) */
+  gap: 13mm 3.5mm;   /* row-gap (vertical) × column-gap (horizontal) */
   page-break-after: always; break-after: page;
 }
 .label-page:last-child { page-break-after: auto; break-after: auto; }
 
 .olabel {
-  width: 128mm; height: 79mm;
+  width: 128mm; height: 81mm;
   border: 2.2px solid var(--ol-blue); border-radius: 7px;
-  padding: 2.4mm 4mm; overflow: hidden;
+  padding: 1.6mm 4mm; overflow: hidden;
   display: flex; flex-direction: column;
   page-break-inside: avoid; break-inside: avoid;
-}
-.ol-page-note {
-  width: 261mm; margin: 2mm auto 0; text-align: center;
-  font-size: 8.5px; font-weight: 700; letter-spacing: .5px; color: var(--ol-ink);
 }
 @media screen { .label-page { margin-bottom: 10mm; } }
 
