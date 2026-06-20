@@ -837,6 +837,32 @@ def unlink_shipments(payload: IdsPayload):
         return {"ok": True, "count": len(ships)}
 
 
+@app.get("/api/links")
+def list_links():
+    """Return every link group and its member boxes, independent of paging or
+    the current filter, so the UI can show a complete and consistent
+    'linked with' indicator next to each box number throughout the system.
+
+    Shape: { "<group_id>": [{id, box_number, batch_date, receiver_name}, ...] }
+    Only shipments that actually belong to a link group are included.
+    """
+    with Session(engine) as s:
+        rows = list(s.scalars(
+            select(Shipment)
+            .where(Shipment.link_group.is_not(None))
+            .order_by(Shipment.link_group, Shipment.box_number)
+        ).all())
+    groups: dict[int, list] = {}
+    for r in rows:
+        groups.setdefault(r.link_group, []).append({
+            "id": r.id,
+            "box_number": r.box_number,
+            "batch_date": r.batch_date.isoformat(),
+            "receiver_name": r.receiver_name or "",
+        })
+    return groups
+
+
 @app.get("/api/dashboard")
 def dashboard_summary():
     """Dashboard KPI figures — this month, all-time, and last 8 batches."""

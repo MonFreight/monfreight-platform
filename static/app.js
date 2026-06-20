@@ -20,10 +20,34 @@ const _filterEnd   = window.FILTER_END   || "";
 const _LG_CLASSES = ["lg1","lg2","lg3","lg4","lg5","lg6","lg7","lg8"];
 let _lgClassMap = {};   // link_group int → CSS class string
 
+// Complete, page-independent map of every link group → its member boxes,
+// loaded from /api/links. This lets the link indicator (icon + tooltip)
+// stay consistent for ALL linked boxes even when group members fall on
+// different pages or are hidden by the current filter.
+let _lgFull = {};       // "link_group" → [{id, box_number, batch_date, receiver_name}]
+
+async function loadLinkMap() {
+  try {
+    const res = await fetch("/api/links");
+    if (res.ok) _lgFull = await res.json();
+  } catch (_) { /* keep last good map on error */ }
+  if (typeof renderTable === "function") renderTable();
+}
+
+// Return the full member list for a group (from the complete server map).
+function _linkMembers(group) {
+  return _lgFull[group] || _lgFull[String(group)] || [];
+}
+
 function _buildLgMap(rows) {
-  const groups = [...new Set(rows.map(r => r.link_group).filter(g => g != null))].sort((a,b) => a-b);
+  // Colour each group deterministically from the union of all known groups
+  // (server map + current page) sorted by id, so a given group always keeps
+  // the same colour regardless of which page it appears on.
+  const groups = new Set(Object.keys(_lgFull).map(Number).filter(g => !Number.isNaN(g)));
+  rows.forEach(r => { if (r.link_group != null) groups.add(Number(r.link_group)); });
+  const sorted = [...groups].sort((a, b) => a - b);
   _lgClassMap = {};
-  groups.forEach((g, i) => { _lgClassMap[g] = _LG_CLASSES[i % _LG_CLASSES.length]; });
+  sorted.forEach((g, i) => { _lgClassMap[g] = _LG_CLASSES[i % _LG_CLASSES.length]; });
 }
 
 // Default sort matches server-side: batch_date desc, box_number asc secondary.
@@ -281,13 +305,20 @@ function renderTable() {
   if (rows.length === 0) $("#emptyMsg").classList.remove("hidden");
   else                   $("#emptyMsg").classList.add("hidden");
 
-  // Build link_group → related box numbers map for tooltips
+  // Build link_group → related box numbers map for tooltips.
+  // Prefer the complete server-side map so the tooltip lists EVERY box in the
+  // group (even ones on other pages); fall back to current-page rows.
   _buildLgMap(rows);
-  const _lgBoxLabels = {};  // link_group → "BOX 1, BOX 2, …"
+  const _lgBoxLabels = {};  // link_group → ["BOX 1", "BOX 2", …]
+  for (const [g, members] of Object.entries(_lgFull)) {
+    _lgBoxLabels[g] = members.map(m => `BOX ${m.box_number}`);
+  }
   for (const r of rows) {
     if (r.link_group == null) continue;
     if (!_lgBoxLabels[r.link_group]) _lgBoxLabels[r.link_group] = [];
-    _lgBoxLabels[r.link_group].push(`BOX ${r.box_number}`);
+    if (!_lgBoxLabels[r.link_group].includes(`BOX ${r.box_number}`)) {
+      _lgBoxLabels[r.link_group].push(`BOX ${r.box_number}`);
+    }
   }
 
   for (const r of rows) {
@@ -306,8 +337,8 @@ function renderTable() {
       const cls = _lgClassMap[r.link_group] || "";
       // Tooltip shows the OTHER boxes in the group, not the current one
       const others = (_lgBoxLabels[r.link_group] || []).filter(label => label !== `BOX ${r.box_number}`).join(", ");
-      const tipText = others ? `Linked with: ${others}` : "Linked";
-      linkBadge = `<span class="link-badge" style="background:var(--${cls});color:var(--${cls}b);border:1px solid var(--${cls}b)" title="${escapeAttr(tipText)}"></span>`;
+      const tipText = others ? `Linked with: ${others} (click to highlight)` : "Linked box";
+      linkBadge = `<span class="link-badge" data-link-group="${r.link_group}" role="button" tabindex="0" style="background:var(--${cls});color:var(--${cls}b);border:1px solid var(--${cls}b)" title="${escapeAttr(tipText)}" aria-label="${escapeAttr(tipText)}"></span>`;
     }
 
     tr.innerHTML = `
@@ -338,7 +369,17 @@ function renderTable() {
     `;
     tbody.appendChild(tr);
   }
-  recomputeStats(rows);
+  // Summary bar:
+  //  • When a Batch Date / date range / search filter is active, always show
+  //    the COMPLETE totals for that batch (all pages) via loadBatchStats().
+  //    This must run on every render — including the 15s background poll — so
+  //    the full batch summary never reverts to a current-page-only summary.
+  //  • With no filter active, fall back to the current-page summary.
+  if (window.FILTER_START || window.FILTER_END || window.SEARCH_Q) {
+    loadBatchStats();
+  } else {
+    recomputeStats(rows);
+  }
   updateSortIndicators();
   updateSelectionUI();
 }
@@ -484,6 +525,7 @@ function _applyLinkLocally(ids, newGroup) {
   shipments.forEach(r => {
     if (ids.includes(r.id) || mergedGroups.has(r.link_group)) r.link_group = newGroup;
   });
+  loadLinkMap();   // refresh the complete link map so indicators stay accurate
 }
 
 function _applyUnlinkLocally(ids) {
@@ -497,6 +539,7 @@ function _applyUnlinkLocally(ids) {
       if (mates.length === 1) r.link_group = null;
     }
   });
+  loadLinkMap();   // refresh the complete link map so indicators stay accurate
 }
 
 async function renderEditLinkSection() {
@@ -783,9 +826,47 @@ $("#newForm").addEventListener("submit", async e => {
 
 const tableBody = $("#shipTable tbody");
 
+// Highlight every box that shares a link group, list them, and flag any that
+// live on other pages. Driven by the complete /api/links map so it works for
+// all linked boxes throughout the system, not just the current page.
+function highlightLinkGroup(group) {
+  if (group == null || group === "") return;
+  const members = _linkMembers(group);
+  const memberIds = new Set(members.map(m => m.id));
+  const trs = $$("#shipTable tbody tr");
+  trs.forEach(tr => tr.classList.remove("link-flash"));
+  let onPage = 0, firstEl = null;
+  trs.forEach(tr => {
+    if (memberIds.has(+tr.dataset.id)) {
+      tr.classList.add("link-flash");
+      onPage++;
+      if (!firstEl) firstEl = tr;
+    }
+  });
+  if (firstEl) firstEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  const labels = members.map(m => `BOX ${m.box_number}`).join(", ");
+  const msg = labels ? `Linked boxes: ${labels}` : "This box is linked.";
+  const offPage = members.length - onPage;
+  toast(offPage > 0 ? `${msg} · ${offPage} on other page${offPage === 1 ? "" : "s"}` : msg, "ok");
+  setTimeout(() => $$("#shipTable tbody tr").forEach(tr => tr.classList.remove("link-flash")), 3000);
+}
+
+// Keyboard activation for the focusable link badge (Enter / Space)
+tableBody.addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const badge = e.target.closest?.(".link-badge");
+  if (!badge) return;
+  e.preventDefault();
+  highlightLinkGroup(badge.dataset.linkGroup);
+});
+
 tableBody.addEventListener("click", async e => {
   const tr = e.target.closest("tr"); if (!tr) return;
   const id = +tr.dataset.id;
+
+  // Link badge → show & highlight all boxes linked together in this group
+  const badge = e.target.closest(".link-badge");
+  if (badge) { highlightLinkGroup(badge.dataset.linkGroup); return; }
 
   // Paid pill toggle
   const pill = e.target.closest(".paid-pill");
@@ -1050,7 +1131,9 @@ function openEdit(ship) {
 function closeEdit() { editModal.classList.add("hidden"); }
 $("#editClose").addEventListener("click", closeEdit);
 $("#editCancel").addEventListener("click", closeEdit);
-editModal.addEventListener("click", e => { if (e.target === editModal) closeEdit(); });
+// NOTE: Edit window intentionally does NOT close on outside (backdrop) click.
+// It only closes via Save Changes, Cancel, or the Close (X) button so that
+// unsaved changes can't be lost by an accidental click outside the popup.
 
 function getEditPrice() {
   const v = editForm.elements["price_input"].value.trim();
@@ -2053,6 +2136,7 @@ rebuildLabelPanelLinks?.();
 // ============================================================
 
 renderTable();
+loadLinkMap();   // load the complete link-group map, then re-render with full indicators
 // Dashboard loaded by switchPanel on init
 
 // ============================================================
@@ -2112,7 +2196,7 @@ loadBatchStats();
       // Only re-render if data actually changed
       if (JSON.stringify(fresh) !== JSON.stringify(shipments)) {
         shipments = fresh;
-        renderTable();
+        loadLinkMap();   // refresh complete link map (also re-renders the table)
       }
     } catch (_) {
       // Silently ignore network errors during polling
