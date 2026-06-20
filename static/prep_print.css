@@ -34,80 +34,80 @@ body {
 
 /* One page = four landscape labels in a 2×2 arrangement. */
 .label-page {
-  width: 283mm; margin: 0 auto;
+  width: 261mm; margin: 0 auto;
   display: flex; flex-wrap: wrap; align-content: flex-start;
-  gap: 4mm;
+  gap: 3.5mm;
   page-break-after: always; break-after: page;
 }
 .label-page:last-child { page-break-after: auto; break-after: auto; }
 
 .olabel {
-  width: 139mm; height: 90mm;
-  border: 2.5px solid var(--ol-blue); border-radius: 8px;
-  padding: 3mm 4.5mm; overflow: hidden;
+  width: 128mm; height: 83mm;
+  border: 2.2px solid var(--ol-blue); border-radius: 7px;
+  padding: 2.6mm 4mm; overflow: hidden;
   display: flex; flex-direction: column;
   page-break-inside: avoid; break-inside: avoid;
 }
 .ol-page-note {
-  width: 283mm; margin: 2mm auto 0; text-align: center;
-  font-size: 9.5px; font-weight: 700; letter-spacing: .5px; color: var(--ol-ink);
+  width: 261mm; margin: 2mm auto 0; text-align: center;
+  font-size: 8.5px; font-weight: 700; letter-spacing: .5px; color: var(--ol-ink);
 }
 @media screen { .label-page { margin-bottom: 10mm; } }
 
 /* Header: logo + company name only */
 .ol-head {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: center; gap: 8px;
   border-bottom: 2px solid var(--ol-blue); padding-bottom: 3px; margin-bottom: 3px;
 }
-.ol-logo { width: 64px; height: auto; max-height: 44px; object-fit: contain; }
-.ol-co-name { font-size: 21px; font-weight: 800; color: var(--ol-blue); letter-spacing: .3px; }
+.ol-logo { width: 58px; height: auto; max-height: 40px; object-fit: contain; }
+.ol-co-name { font-size: 19px; font-weight: 800; color: var(--ol-blue); letter-spacing: .3px; }
 
 /* 3-column body */
-.ol-grid { flex: 1; display: grid; grid-template-columns: 23mm 1fr 49mm; gap: 3.5mm; min-height: 0; }
+.ol-grid { flex: 1; display: grid; grid-template-columns: 21mm 1fr 45mm; gap: 3mm; min-height: 0; }
 
 /* Column A — package number */
 .ol-col-pkg { display: flex; flex-direction: column; justify-content: center; }
-.ol-pkg-cap { font-size: 13px; font-weight: 700; color: var(--ol-ink); letter-spacing: 1px; }
-.ol-pkg-num { font-size: 40px; font-weight: 900; color: var(--ol-ink); line-height: 1; }
+.ol-pkg-cap { font-size: 12px; font-weight: 700; color: var(--ol-ink); letter-spacing: 1px; }
+.ol-pkg-num { font-size: 36px; font-weight: 900; color: var(--ol-ink); line-height: 1; }
 
 /* Column B — shipment info */
-.ol-col-info { display: flex; flex-direction: column; justify-content: center; gap: 2.5mm; }
-.ol-field { display: flex; align-items: flex-start; gap: 7px; }
+.ol-col-info { display: flex; flex-direction: column; justify-content: center; gap: 2.2mm; }
+.ol-field { display: flex; align-items: flex-start; gap: 6px; }
 .ol-fi { flex: 0 0 auto; }
-.fi-ico { width: 18px; height: 18px; fill: none; stroke: var(--ol-blue);
+.fi-ico { width: 16px; height: 16px; fill: none; stroke: var(--ol-blue);
           stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: block; }
 .ol-ft { display: flex; flex-direction: column; line-height: 1.15; }
-.ol-fl { font-size: 9.5px; font-weight: 700; color: var(--ol-blue); letter-spacing: .4px; }
-.ol-fv { font-size: 12px; font-weight: 700; color: var(--ol-ink); }
+.ol-fl { font-size: 9px; font-weight: 700; color: var(--ol-blue); letter-spacing: .4px; }
+.ol-fv { font-size: 11px; font-weight: 700; color: var(--ol-ink); }
 
 /* Column C — handling / drop-off / battery / barcode */
-.ol-col-right { display: flex; flex-direction: column; gap: 1.6mm; min-width: 0; }
+.ol-col-right { display: flex; flex-direction: column; gap: 1.4mm; min-width: 0; }
 .ol-handle { text-align: center; }
-.ol-handle-title { font-size: 9px; font-weight: 800; color: var(--ol-blue); letter-spacing: .5px; }
-.ol-handle-icons { display: flex; justify-content: center; flex-wrap: nowrap; gap: 4px; margin-top: 1px; }
+.ol-handle-title { font-size: 8.5px; font-weight: 800; color: var(--ol-blue); letter-spacing: .5px; }
+.ol-handle-icons { display: flex; justify-content: center; flex-wrap: nowrap; gap: 3.5px; margin-top: 1px; }
 .ol-hmark { display: inline-flex; flex-direction: column; align-items: center; gap: 0;
-            border: 1.4px solid var(--ol-blue); border-radius: 4px; padding: 1px 3px; min-width: 0; flex: 1 1 0; }
-.hm-ico { width: 15px; height: 15px; fill: none; stroke: var(--ol-blue);
+            border: 1.3px solid var(--ol-blue); border-radius: 4px; padding: 1px 2.5px; min-width: 0; flex: 1 1 0; }
+.hm-ico { width: 14px; height: 14px; fill: none; stroke: var(--ol-blue);
           stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.ol-hmark-txt { font-size: 5.6px; font-weight: 800; color: var(--ol-blue); letter-spacing: .1px; white-space: nowrap; }
+.ol-hmark-txt { font-size: 5.2px; font-weight: 800; color: var(--ol-blue); letter-spacing: .1px; white-space: nowrap; }
 
-.ol-dropoff { border: 1.5px solid var(--ol-blue); border-radius: 5px; padding: 1px 6px; text-align: center; }
-.ol-dropoff-cap { display: block; font-size: 7.5px; font-weight: 700; color: var(--ol-blue); letter-spacing: .5px; }
-.ol-dropoff-val { display: block; font-size: 16px; font-weight: 900; color: var(--ol-ink); letter-spacing: 1px; }
+.ol-dropoff { border: 1.4px solid var(--ol-blue); border-radius: 5px; padding: 1px 5px; text-align: center; }
+.ol-dropoff-cap { display: block; font-size: 7px; font-weight: 700; color: var(--ol-blue); letter-spacing: .5px; }
+.ol-dropoff-val { display: block; font-size: 15px; font-weight: 900; color: var(--ol-ink); letter-spacing: 1px; }
 
-.ol-battery { border: 1.5px solid var(--ol-blue); border-radius: 5px; padding: 2px 6px; text-align: center; }
-.ol-battery-title { font-size: 8px; font-weight: 800; color: var(--ol-blue); letter-spacing: .4px; }
+.ol-battery { border: 1.4px solid var(--ol-blue); border-radius: 5px; padding: 2px 5px; text-align: center; }
+.ol-battery-title { font-size: 7.5px; font-weight: 800; color: var(--ol-blue); letter-spacing: .4px; }
 .ol-battery-main { display: flex; align-items: center; justify-content: center; gap: 5px; }
-.ol-bat-ico { width: 19px; height: 19px; fill: none; stroke: var(--ol-ink);
+.ol-bat-ico { width: 17px; height: 17px; fill: none; stroke: var(--ol-ink);
               stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.ol-bat-un { font-size: 16px; font-weight: 900; color: var(--ol-ink); letter-spacing: .5px; }
-.ol-bat-detail { font-size: 8px; font-weight: 600; color: var(--ol-ink); line-height: 1.2; }
-.ol-no-battery { border-style: dashed; border-color: #94a3b8; display: flex; align-items: center; justify-content: center; min-height: 34px; }
-.ol-no-bat-txt { font-size: 8.5px; font-weight: 700; color: #94a3b8; letter-spacing: .5px; text-align: center; }
+.ol-bat-un { font-size: 15px; font-weight: 900; color: var(--ol-ink); letter-spacing: .5px; }
+.ol-bat-detail { font-size: 7.5px; font-weight: 600; color: var(--ol-ink); line-height: 1.2; }
+.ol-no-battery { border-style: dashed; border-color: #94a3b8; display: flex; align-items: center; justify-content: center; min-height: 30px; }
+.ol-no-bat-txt { font-size: 8px; font-weight: 700; color: #94a3b8; letter-spacing: .5px; text-align: center; }
 
 .ol-codes { margin-top: auto; text-align: center; padding-top: 1mm; }
-.ol-barcode { display: block; margin: 0 auto; width: 100%; max-width: 46mm; height: 30px; }
-.ol-ref-text { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; margin-top: 0; color: var(--ol-ink); }
+.ol-barcode { display: block; margin: 0 auto; width: 100%; max-width: 42mm; height: 28px; }
+.ol-ref-text { font-size: 9px; font-weight: 700; letter-spacing: 1px; margin-top: 0; color: var(--ol-ink); }
 
 /* ======================================================================
    PACKING LIST / INVOICE  (mirrors the uploaded template)

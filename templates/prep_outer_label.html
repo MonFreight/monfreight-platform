@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <title>Outer Package Labels</title>
-<link rel="stylesheet" href="/static/prep_print.css?v=3">
+<link rel="stylesheet" href="/static/prep_print.css?v=4">
 <style>
   /* Outer labels print on A4 landscape, 4 labels per page (2 × 2). */
-  @page { size: A4 landscape; margin: 7mm; }
+  @page { size: A4 landscape; margin: 9mm; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
@@ -159,7 +159,7 @@ window.addEventListener("load", () => {
   document.querySelectorAll(".ol-barcode").forEach(el => {
     const code = el.dataset.code || "";
     if (!code || !window.JsBarcode) return;
-    try { JsBarcode(el, code, { format: "CODE128", width: 1.5, height: 34,
+    try { JsBarcode(el, code, { format: "CODE128", width: 1.4, height: 28,
                                 displayValue: false, margin: 0 }); }
     catch (e) { console.warn("barcode failed", e); }
   });
