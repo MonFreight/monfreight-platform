@@ -165,9 +165,12 @@
   function renderAssignTarget() {
     const sel = q("#prepAssignTarget");
     if (!sel) return;
+    const prev = sel.value;
     sel.innerHTML = state.packages.map(p =>
       `<option value="${p.id}">#${p.package_number} · ${esc(p.package_type)} · ${esc(p.reference_number)}</option>`).join("")
       || `<option value="">(no packages — create one first)</option>`;
+    // Keep the previously selected carton active instead of jumping back to the first.
+    if (prev && state.packages.some(p => String(p.id) === prev)) sel.value = prev;
   }
 
   // ---- parcels + assignment ----
@@ -209,9 +212,29 @@
   }
 
   async function assignSelected(packageId) {
-    const ids = selectedParcelIds();
+    let ids = selectedParcelIds();
     if (!ids.length) { notify("Tick at least one parcel first", "err"); return; }
     if (packageId !== null && !state.packages.length) { notify("Create a package first", "err"); return; }
+    // Prevent duplicate assignments: a parcel already in another carton must be
+    // unassigned first before it can move to a different carton.
+    if (packageId !== null) {
+      const blocked = ids.filter(id => {
+        const p = state.parcels.find(x => x.id === id);
+        return p && p.package_id && p.package_id !== packageId;
+      });
+      if (blocked.length) {
+        ids = ids.filter(id => !blocked.includes(id));
+        const names = blocked.map(id => {
+          const p = state.parcels.find(x => x.id === id);
+          return p ? `BOX ${p.box_number} (${pkgNumFor(p.package_id)})` : id;
+        }).join(", ");
+        if (!ids.length) {
+          notify(`Already assigned — unassign first: ${names}`, "err");
+          return;
+        }
+        notify(`Skipped already-assigned parcel(s): ${names}. Unassign them first.`, "err");
+      }
+    }
     const r = await fetch("/api/prep/assign", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ parcel_ids: ids, package_id: packageId }),

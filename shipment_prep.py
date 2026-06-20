@@ -684,14 +684,22 @@ def assign_parcels(payload: AssignIn, request: Request):
             if not pkg:
                 raise HTTPException(404, "Target package not found")
         moved = 0
+        skipped = 0
         for pid in payload.parcel_ids:
             sh = s.get(_Shipment, pid)
             if not sh:
                 continue
+            # Prevent duplicate assignment: a parcel already in another carton
+            # must be unassigned first before moving to a different carton.
+            if (payload.package_id is not None
+                    and getattr(sh, "package_id", None) is not None
+                    and sh.package_id != payload.package_id):
+                skipped += 1
+                continue
             sh.package_id = payload.package_id   # None => unassign
             moved += 1
         s.commit()
-        return {"ok": True, "moved": moved}
+        return {"ok": True, "moved": moved, "skipped": skipped}
 
 
 # --------------------------------------------------------------------------
