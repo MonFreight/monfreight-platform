@@ -56,6 +56,41 @@ CONSIGNEE_DETAILS = (
 TO_PARTY = "PickPack Worldwide LLC"
 DESTINATION = "Ulaanbaatar, Mongolia"
 
+# Canonical handling-mark options an admin can tick in Shipment Preparation.
+# Order here is the order they appear on the printed label.
+HANDLING_MARKS = [
+    "Fragile",
+    "This Way Up",
+    "Keep Dry",
+    "Heavy",
+    "Battery / Lithium Battery",
+]
+_HANDLING_LOOKUP = {m.lower(): m for m in HANDLING_MARKS}
+
+
+def _clean_handling_marks(raw) -> str:
+    """Normalise handling marks (list or comma string) to a canonical CSV string."""
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",")]
+    else:
+        parts = [str(p).strip() for p in raw]
+    out = []
+    for p in parts:
+        if not p:
+            continue
+        canon = _HANDLING_LOOKUP.get(p.lower(), p)
+        if canon not in out:
+            out.append(canon)
+    return ",".join(out)
+
+
+def _split_handling_marks(value: str) -> list[str]:
+    if not value:
+        return []
+    return [p.strip() for p in value.split(",") if p.strip()]
+
 
 # --------------------------------------------------------------------------
 # models
@@ -78,6 +113,8 @@ class Package(PrepBase):
     reference_number = Column(String, default="")
     notes = Column(String, default="")
     status = Column(String, default="Open")                  # Open/Packed/Ready for Shipment
+    dropoff_reference = Column(String, default="")           # e.g. "H9337" (manual, admin)
+    handling_marks = Column(String, default="")              # comma-separated, e.g. "Fragile,This Way Up"
     created_at = Column(DateTime, default=dt.datetime.now)
 
 
@@ -376,6 +413,8 @@ def _package_totals(session: Session, pkg: Package) -> dict:
         "reference_number": pkg.reference_number or "",
         "notes": pkg.notes or "",
         "status": pkg.status or "Open",
+        "dropoff_reference": (pkg.dropoff_reference or "").strip(),
+        "handling_marks": _split_handling_marks(pkg.handling_marks or ""),
         "parcel_count": len(parcels),
         "parcel_count_manual": pkg.parcel_count_manual,
         "total_weight": round(weight, 2),
@@ -410,6 +449,8 @@ class PackageIn(BaseModel):
     reference_number: str = ""
     notes: str = ""
     status: str = "Open"
+    dropoff_reference: str = ""
+    handling_marks: list[str] = []
     parcel_count_manual: Optional[int] = None
 
 
@@ -422,6 +463,8 @@ class PackagePatch(BaseModel):
     reference_number: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    dropoff_reference: Optional[str] = None
+    handling_marks: Optional[list[str]] = None
     parcel_count_manual: Optional[int] = None
 
 
@@ -468,6 +511,8 @@ def create_package(payload: PackageIn, request: Request):
             height_cm=payload.height_cm or 0,
             reference_number=ref, notes=payload.notes or "",
             status=payload.status or "Open",
+            dropoff_reference=(payload.dropoff_reference or "").strip(),
+            handling_marks=_clean_handling_marks(payload.handling_marks),
             parcel_count_manual=payload.parcel_count_manual,
         )
         s.add(pkg)
@@ -483,7 +528,12 @@ def update_package(pkg_id: int, payload: PackagePatch, request: Request):
         if not pkg:
             raise HTTPException(404, "Package not found")
         for field, val in payload.model_dump(exclude_unset=True).items():
-            setattr(pkg, field, val)
+            if field == "handling_marks":
+                pkg.handling_marks = _clean_handling_marks(val)
+            elif field == "dropoff_reference":
+                pkg.dropoff_reference = (val or "").strip()
+            else:
+                setattr(pkg, field, val)
         s.commit()
         return _package_totals(s, pkg)
 
@@ -709,6 +759,7 @@ def _company(batch_date: dt.date) -> dict:
 
 @router.get("/prep/{date}/labels.html", response_class=HTMLResponse)
 def print_outer_labels(request: Request, date: str, ids: str = ""):
+    require_admin(request)   # only admins may generate/print package labels
     bd = _parse_date(date)
     with Session(_engine) as s:
         q = select(Package).where(Package.batch_date == bd).order_by(Package.package_number)
@@ -729,6 +780,7 @@ def print_outer_labels(request: Request, date: str, ids: str = ""):
 
 @router.get("/prep/package/{pkg_id}/label.html", response_class=HTMLResponse)
 def print_single_label(request: Request, pkg_id: int):
+    require_admin(request)   # only admins may generate/print package labels
     with Session(_engine) as s:
         pkg = s.get(Package, pkg_id)
         if not pkg:
@@ -795,6 +847,22 @@ def _ensure_package_id_column(engine):
                 pass
 
 
+def _ensure_package_columns(engine):
+    """Add newer packages columns (dropoff_reference, handling_marks) on existing DBs."""
+    if not str(engine.url).startswith("sqlite"):
+        return
+    with engine.connect() as conn:
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(packages)")).fetchall()}
+        for name in ("dropoff_reference", "handling_marks"):
+            if name not in cols:
+                try:
+                    conn.execute(text(
+                        f"ALTER TABLE packages ADD COLUMN {name} VARCHAR DEFAULT ''"))
+                    conn.commit()
+                except Exception:
+                    pass
+
+
 def init_prep(app, engine, templates, Shipment) -> None:
     global _engine, _templates, _Shipment
     _engine = engine
@@ -802,4 +870,5 @@ def init_prep(app, engine, templates, Shipment) -> None:
     _Shipment = Shipment
     PrepBase.metadata.create_all(engine)
     _ensure_package_id_column(engine)
+    _ensure_package_columns(engine)
     app.include_router(router)

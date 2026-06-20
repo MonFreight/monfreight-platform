@@ -27,64 +27,66 @@ body {
 @media print { .no-print { display: none !important; } body { background: #fff; } }
 
 /* ======================================================================
-   OUTER PACKAGE LABEL
+   OUTER PACKAGE LABEL  — 4 labels per A4 page (2 × 2 grid)
    ====================================================================== */
-.olabel {
-  width: 190mm; min-height: 273mm;
-  margin: 0 auto 14px; background: #fff;
-  border: 2px solid #0f3d47; border-radius: 6px;
-  padding: 8mm; page-break-after: always; break-after: page;
-  display: flex; flex-direction: column; gap: 5mm;
+/* One page = four labels in a 2×2 arrangement (flex-wrap with fixed-size
+   labels — renders identically across browser print engines). Each label
+   is large and clear for attaching to outer cartons. */
+.label-page {
+  width: 190mm; margin: 0 auto;
+  display: flex; flex-wrap: wrap; align-content: flex-start;
+  gap: 6mm;
+  page-break-after: always; break-after: page;
 }
-.olabel:last-child { page-break-after: auto; }
+.label-page:last-child { page-break-after: auto; break-after: auto; }
+.label-page + .label-page { margin-top: 0; }
 
-.ol-head { display: flex; align-items: center; gap: 10px; border-bottom: 2px solid #0f3d47; padding-bottom: 6px; }
-.ol-logo { width: 64px; height: 64px; object-fit: contain; }
-.ol-co { flex: 1; }
-.ol-co-name { font-size: 20px; font-weight: 800; color: #0f3d47; letter-spacing: .5px; }
-.ol-co-sub { font-size: 10.5px; color: #334155; }
-.ol-pkgbox { text-align: center; border: 2px solid #0f3d47; border-radius: 6px; padding: 6px 12px; min-width: 120px; }
-.ol-pkg-label { font-size: 10px; font-weight: 700; color: #64748b; letter-spacing: 1px; }
-.ol-pkg-num { font-size: 30px; font-weight: 900; color: #0f3d47; line-height: 1.05; }
-.ol-pkg-num span { font-size: 13px; font-weight: 600; color: #64748b; }
-.ol-pkg-type { font-size: 12px; font-weight: 700; color: #1a5a68; text-transform: uppercase; }
+.olabel {
+  width: 92mm; height: 130mm;
+  border: 2.5px solid #0f3d47; border-radius: 8px;
+  padding: 5mm 5mm;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 3mm; overflow: hidden;
+  page-break-inside: avoid; break-inside: avoid;
+}
+/* on-screen spacing so the page groups don't butt together */
+@media screen { .label-page { margin-bottom: 10mm; } }
 
-.ol-dest { display: flex; align-items: center; gap: 12px; background: #0f3d47; color: #fff; padding: 8px 12px; border-radius: 5px; }
-.ol-dest-label { font-size: 11px; font-weight: 700; opacity: .8; }
-.ol-dest-val { font-size: 22px; font-weight: 900; flex: 1; letter-spacing: 1px; }
-.ol-batch { font-size: 13px; font-weight: 700; background: rgba(255,255,255,.15); padding: 4px 10px; border-radius: 4px; }
+/* Header: logo + company name */
+.ol-head { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.ol-logo { width: 110px; height: auto; max-height: 64px; object-fit: contain; }
+.ol-co-name { font-size: 19px; font-weight: 800; color: #0f3d47; letter-spacing: .5px; }
 
-.ol-body { display: flex; gap: 6mm; }
-.ol-consignee { flex: 1.2; border: 1px solid #cbd5e1; border-radius: 5px; padding: 8px 10px; }
-.ol-meta { flex: 1; }
-.ol-sec-title { font-size: 10px; font-weight: 800; color: #64748b; letter-spacing: 1px; margin-bottom: 4px; }
-.ol-pre { font-family: Arial, sans-serif; font-size: 13px; white-space: pre-wrap; margin: 0; line-height: 1.5; }
-.ol-meta-tbl { width: 100%; border-collapse: collapse; }
-.ol-meta-tbl th, .ol-meta-tbl td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; font-size: 12.5px; }
-.ol-meta-tbl th { background: #f0f7f9; color: #0f3d47; width: 42%; font-weight: 700; }
-.ol-meta-tbl td { font-weight: 700; }
+/* Package number (e.g. 1/5) */
+.ol-pkg { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.ol-pkg-cap { font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 3px; }
+.ol-pkg-num { font-size: 48px; font-weight: 900; color: #0f3d47; line-height: 1; }
 
-.ol-items { border: 1px solid #cbd5e1; border-radius: 5px; padding: 8px 10px; }
-.ol-items-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.ol-chip { background: #e0eef2; color: #0f3d47; border-radius: 4px; padding: 3px 9px; font-size: 12px; font-weight: 600; }
+/* Drop-off reference */
+.ol-dropoff {
+  display: inline-flex; flex-direction: column; align-items: center;
+  border: 2px solid #0f3d47; border-radius: 6px; padding: 5px 18px;
+}
+.ol-dropoff-cap { font-size: 10px; font-weight: 700; color: #64748b; letter-spacing: 2px; }
+.ol-dropoff-val { font-size: 26px; font-weight: 900; color: #0f3d47; letter-spacing: 2px; }
 
-.ol-battery { border: 2px solid #d97706; border-radius: 6px; overflow: hidden; }
-.ol-bat-flag { background: #d97706; color: #fff; font-weight: 800; font-size: 14px; padding: 6px 12px; letter-spacing: 1px; }
-.ol-bat-body { padding: 6px 10px; background: #fffbeb; }
-.ol-bat-tbl { width: 100%; border-collapse: collapse; }
-.ol-bat-tbl th, .ol-bat-tbl td { padding: 3px 8px; text-align: left; font-size: 12px; border-bottom: 1px solid #fde68a; }
-.ol-bat-tbl th { width: 30%; color: #92400e; font-weight: 700; }
+/* Handling marks */
+.ol-handling { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.ol-hmark {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+  border: 2px solid #0f172a; border-radius: 6px; padding: 3px 6px; min-width: 50px;
+}
+.hm-ico {
+  width: 24px; height: 24px;
+  fill: none; stroke: #0f172a; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ol-hmark-txt { font-size: 8.5px; font-weight: 800; color: #0f172a; letter-spacing: .3px; }
 
-.ol-foot { margin-top: auto; display: flex; gap: 8mm; align-items: flex-end; border-top: 1px solid #cbd5e1; padding-top: 6px; }
-.ol-handling { flex: 1; }
-.ol-handle-icons { display: flex; flex-wrap: wrap; gap: 8px; }
-.ol-handle { border: 1.5px solid #0f172a; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 700; }
-.ol-handle-note { margin-top: 6px; font-size: 11.5px; font-style: italic; color: #334155; }
-.ol-codes { text-align: center; }
-.ol-qr { display: inline-block; }
-.ol-qr img, .ol-qr canvas { display: block; }
-.ol-barcode { display: block; margin: 4px auto 0; width: 150px; height: 36px; }
-.ol-ref-text { font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-top: 2px; }
+/* Barcode */
+.ol-codes { margin-top: auto; width: 100%; }
+.ol-barcode { display: block; margin: 0 auto; width: 75%; max-width: 220px; height: 42px; }
+.ol-ref-text { font-size: 12px; font-weight: 700; letter-spacing: 1px; margin-top: 3px; }
 
 /* ======================================================================
    PACKING LIST / INVOICE  (mirrors the uploaded template)

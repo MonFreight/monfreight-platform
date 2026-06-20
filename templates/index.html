@@ -1139,7 +1139,7 @@
       <h2>Generate Documents (PDF)</h2>
       <p class="muted small" style="margin-top:0;">Each opens a print-ready page — choose “Save as PDF” in the print dialog.</p>
       <div class="prep-doc-btns">
-        <a class="btn" id="prepDocLabels" target="_blank">🏷 Outer Package Labels</a>
+        <a class="btn admin-only" id="prepDocLabels" target="_blank">🏷 Outer Package Labels</a>
         <a class="btn" id="prepDocPacking" target="_blank">📦 Packing List</a>
         <a class="btn" id="prepDocInvoice" target="_blank">🧾 Commercial Invoice</a>
         <a class="btn" id="prepDocSummary" target="_blank">📊 Shipment Summary</a>
@@ -1175,6 +1175,15 @@
         <label>Width (cm)<input type="number" step="0.1" id="pkgW"></label>
         <label>Height (cm)<input type="number" step="0.1" id="pkgH"></label>
         <label>Parcels override<input type="number" id="pkgManual" placeholder="(auto)"></label>
+        <label>Drop-off Reference<input type="text" id="pkgDropoff" placeholder="e.g. H9337"></label>
+        <fieldset class="span2 pkg-handling">
+          <legend>Handling marks <span class="muted small">(shown on label only if ticked)</span></legend>
+          <label class="hm-check"><input type="checkbox" class="pkgHandling" value="Fragile"> Fragile</label>
+          <label class="hm-check"><input type="checkbox" class="pkgHandling" value="This Way Up"> This Way Up</label>
+          <label class="hm-check"><input type="checkbox" class="pkgHandling" value="Keep Dry"> Keep Dry</label>
+          <label class="hm-check"><input type="checkbox" class="pkgHandling" value="Heavy"> Heavy</label>
+          <label class="hm-check"><input type="checkbox" class="pkgHandling" value="Battery / Lithium Battery"> Battery / Lithium Battery</label>
+        </fieldset>
         <label class="span2">Notes / handling remarks<input type="text" id="pkgNotes"></label>
       </div>
     </div>

@@ -236,6 +236,9 @@
     q("#pkgH").value = p ? (p.height_cm || "") : "";
     q("#pkgManual").value = p && p.parcel_count_manual != null ? p.parcel_count_manual : "";
     q("#pkgNotes").value = p ? p.notes : "";
+    q("#pkgDropoff").value = p && p.dropoff_reference ? p.dropoff_reference : "";
+    const marks = (p && p.handling_marks) ? p.handling_marks : [];
+    qa(".pkgHandling").forEach(cb => { cb.checked = marks.includes(cb.value); });
     q("#prepPkgModal").classList.remove("hidden");
   }
   function closePkgModal() { q("#prepPkgModal").classList.add("hidden"); }
@@ -251,6 +254,8 @@
       width_cm: parseFloat(q("#pkgW").value) || 0,
       height_cm: parseFloat(q("#pkgH").value) || 0,
       notes: q("#pkgNotes").value.trim(),
+      dropoff_reference: q("#pkgDropoff").value.trim(),
+      handling_marks: qa(".pkgHandling").filter(cb => cb.checked).map(cb => cb.value),
     };
     const man = q("#pkgManual").value.trim();
     body.parcel_count_manual = man === "" ? null : parseInt(man, 10);
