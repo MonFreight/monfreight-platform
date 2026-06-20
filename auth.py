@@ -8,7 +8,10 @@ Features
   user's registered mobile number. Codes expire after 5 minutes.
 * Brute-force protection: account lockout after repeated bad passwords,
   per-user/per-IP limits on code sends, max 5 wrong code attempts per code.
-* Signed, HttpOnly session cookies (itsdangerous), 12h lifetime by default.
+* Signed, HttpOnly browser-session cookies (itsdangerous) that clear when
+  the browser closes, so a browser/computer restart forces a fresh login.
+* SMS verification is required only once per SMS_TRUST_HOURS (default 24h)
+  per device; within that window, password login signs the user straight in.
 * Admin-managed users (no public sign-up). First run creates a default
   admin account and prints its credentials to the server log.
 
@@ -23,6 +26,8 @@ TWILIO_ACCOUNT_SID    Twilio credentials — if missing, runs in DEV MODE:
 TWILIO_AUTH_TOKEN     the code is shown on the login page instead of sent
 TWILIO_FROM           by SMS (configure Twilio before real go-live!)
 OTP_TTL_SECONDS       code lifetime (default 300 = 5 minutes)
+SMS_TRUST_HOURS       how long an SMS verification is trusted before it is
+                      required again (default 24)
 """
 from __future__ import annotations
 
@@ -76,6 +81,10 @@ PBKDF2_ITERATIONS = 600_000
 
 SESSION_COOKIE = "mf_session"
 PENDING_COOKIE = "mf_pending"
+SMS_TRUST_COOKIE = "mf_sms"            # persistent: remembers SMS already done
+
+# How long an SMS verification stays valid before it's required again.
+SMS_TRUST_HOURS = int(os.environ.get("SMS_TRUST_HOURS", "24"))
 
 # Paths reachable without a session
 PUBLIC_PREFIXES = ("/static/", "/auth/")
@@ -102,6 +111,7 @@ def _load_secret_key() -> str:
 SECRET_KEY = _load_secret_key()
 _session_signer = URLSafeTimedSerializer(SECRET_KEY, salt="mf-session")
 _pending_signer = URLSafeTimedSerializer(SECRET_KEY, salt="mf-pending")
+_sms_signer = URLSafeTimedSerializer(SECRET_KEY, salt="mf-sms")
 
 
 # --------------------------------------------------------------------------
@@ -249,14 +259,43 @@ def _mask_phone(phone: str) -> str:
 # --------------------------------------------------------------------------
 # session helpers
 # --------------------------------------------------------------------------
-def _set_cookie(resp, name: str, value: str, max_age: int) -> None:
+def _set_cookie(resp, name: str, value: str, max_age: Optional[int]) -> None:
     # Secure flag: on when explicitly requested, or automatically on
     # Render / Railway (both serve over HTTPS).
     secure = (os.environ.get("COOKIE_SECURE", "") in ("1", "true")
               or bool(os.environ.get("RENDER"))
               or bool(os.environ.get("RAILWAY_ENVIRONMENT")))
-    resp.set_cookie(name, value, max_age=max_age, httponly=True,
-                    samesite="lax", secure=secure, path="/")
+    # max_age=None → browser-session cookie: cleared when the browser closes,
+    # so a browser/computer restart forces a fresh login.
+    kwargs = {} if max_age is None else {"max_age": max_age}
+    resp.set_cookie(name, value, httponly=True,
+                    samesite="lax", secure=secure, path="/", **kwargs)
+
+
+def _issue_session(resp, user: "User") -> None:
+    """Set the (browser-session) login cookie for an authenticated user."""
+    session_val = _session_signer.dumps(
+        {"uid": user.id, "u": user.username, "role": user.role})
+    # No max_age → session cookie, cleared on browser close.
+    _set_cookie(resp, SESSION_COOKIE, session_val, max_age=None)
+
+
+def _set_sms_trust(resp, user: "User") -> None:
+    """Remember that this device passed SMS verification, for SMS_TRUST_HOURS."""
+    token = _sms_signer.dumps({"uid": user.id})
+    _set_cookie(resp, SMS_TRUST_COOKIE, token, max_age=SMS_TRUST_HOURS * 3600)
+
+
+def _sms_trusted(request: Request, user_id: int) -> bool:
+    """True if this device verified by SMS within the trust window."""
+    raw = request.cookies.get(SMS_TRUST_COOKIE)
+    if not raw:
+        return False
+    try:
+        data = _sms_signer.loads(raw, max_age=SMS_TRUST_HOURS * 3600)
+    except (BadSignature, SignatureExpired):
+        return False
+    return data.get("uid") == user_id
 
 
 def current_user_id(request: Request) -> Optional[dict]:
@@ -373,6 +412,19 @@ def auth_login(payload: LoginIn, request: Request):
         if not user or not user.active or not verify_password(payload.password, user.password_hash):
             _record_fail(username)
             raise HTTPException(401, "Invalid username or password.")
+
+        # SMS already done on this device within the last SMS_TRUST_HOURS →
+        # skip the verification step and sign the user straight in.
+        if _sms_trusted(request, user.id):
+            user.last_login = dt.datetime.utcnow()
+            s.commit()
+            _pw_fails.pop(user.username, None)
+            ip2 = request.client.host if request.client else ""
+            _log(user.username, "login", f"Role: {user.role} (SMS trusted)", ip2)
+            resp = JSONResponse({"ok": True, "redirect": "/"})
+            _issue_session(resp, user)
+            resp.delete_cookie(PENDING_COOKIE, path="/")
+            return resp
 
         phones = _phones(user)
         if len(phones) > 1:
@@ -491,13 +543,12 @@ def auth_verify(payload: VerifyIn, request: Request):
         user.last_login = dt.datetime.utcnow()
         s.commit()
         _pw_fails.pop(user.username, None)
-        session_val = _session_signer.dumps(
-            {"uid": user.id, "u": user.username, "role": user.role})
 
     ip = request.client.host if request.client else ""
     _log(user.username, "login", f"Role: {user.role}", ip)
     resp = JSONResponse({"ok": True, "redirect": "/"})
-    _set_cookie(resp, SESSION_COOKIE, session_val, max_age=SESSION_HOURS * 3600)
+    _issue_session(resp, user)            # browser-session cookie
+    _set_sms_trust(resp, user)            # remember SMS for SMS_TRUST_HOURS
     resp.delete_cookie(PENDING_COOKIE, path="/")
     return resp
 
