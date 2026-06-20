@@ -147,6 +147,8 @@ _V_RE = re.compile(r"(\d+(?:\.\d+)?)\s*v\b", re.IGNORECASE)
 _MAH_RE = re.compile(r"(\d+(?:\.\d+)?)\s*mah\b", re.IGNORECASE)
 _QTY_RE = re.compile(r"(?:x|qty|quantity)\s*(\d+)|(\d+)\s*(?:pcs|cells?|batteries|battery|units?)",
                      re.IGNORECASE)
+# Explicit "<count> x <watt-hours> Wh" rating, e.g. "2 x 74Wh".
+_RATING_RE = re.compile(r"(\d+)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*wh\b", re.IGNORECASE)
 
 _BATTERY_HINTS = ("lithium", "li-ion", "li ion", "lipo", "battery", "batteries",
                   "accumulator")
@@ -241,9 +243,54 @@ def _merge_battery(items: list[dict]) -> Optional[dict]:
     mah = _union("mah")
     types = [i["packing_type"] for i in items if i.get("packing_type")]
     conds = [i["condition"] for i in items if i.get("condition")]
+    is_lithium = any(i.get("is_lithium") for i in items)
+
+    # ---- label-ready display fields ----
+    # UN number: use what was detected; default to UN3481 (lithium ion in
+    # equipment) when a battery is present but no UN code was written in notes.
+    un_display = ", ".join(un) if un else "UN3481"
+
+    # Chemistry: lithium metal for UN3090/3091, otherwise lithium ion.
+    if any(u in ("UN3090", "UN3091") for u in un):
+        chemistry = "Lithium metal batteries"
+    elif un or is_lithium:
+        chemistry = "Lithium ion batteries"
+    else:
+        chemistry = "Batteries"
+
+    # Packing: map detected packing type to the short label used on the sticker.
+    packing = ""
+    joined_types = " ".join(types).lower()
+    if "installed" in joined_types or "contained" in joined_types:
+        packing = "Contained in equipment"
+    elif "packed" in joined_types:
+        packing = "Packed with equipment"
+
+    # Rating string(s): "<count> x <Wh>" per parcel, e.g. "2 x 74Wh".
+    # Prefer an explicit "N x M Wh" written in the note; otherwise fall back
+    # to a separately-detected count + capacity.
+    ratings: list[str] = []
+    for i in items:
+        raw = i.get("raw", "") or ""
+        matched = False
+        for m in _RATING_RE.finditer(raw):
+            r = f"{m.group(1)} x {m.group(2)}Wh"
+            matched = True
+            if r not in ratings:
+                ratings.append(r)
+        if matched:
+            continue
+        qty = i.get("quantity")
+        for w in (i.get("capacity_wh") or []):
+            wc = w.replace(" ", "")            # "74 Wh" -> "74Wh"
+            r = f"{qty} x {wc}" if qty else wc
+            if r not in ratings:
+                ratings.append(r)
+    rating_display = " · ".join(ratings)
+
     return {
         "present": True,
-        "is_lithium": any(i.get("is_lithium") for i in items),
+        "is_lithium": is_lithium,
         "un_numbers": un,
         "pi_sections": pi,
         "packing_types": sorted(set(types)),
@@ -253,32 +300,91 @@ def _merge_battery(items: list[dict]) -> Optional[dict]:
         "mah": mah,
         "parcel_count": len(items),
         "lines": [i["raw"] for i in items],
+        # display fields consumed by the outer label
+        "un_display": un_display,
+        "chemistry": chemistry,
+        "packing": packing,
+        "rating_display": rating_display,
     }
 
 
 # --------------------------------------------------------------------------
 # item auto-summary
 # --------------------------------------------------------------------------
+# Professional English categories used on the Packing List / Commercial Invoice.
+# Order matters: the first matching category wins, so the more specific
+# "Electronic Devices with Lithium Batteries" is checked before "Electronics".
 _CATEGORY_KEYWORDS = {
-    "Vitamins": ["vitamin", "supplement", "omega", "fish oil", "collagen", "magnesium"],
-    "Clothes": ["clothes", "clothing", "shirt", "jacket", "pant", "trouser",
-                "dress", "hoodie", "apparel", "garment"],
-    "Shoes": ["shoe", "boot", "sneaker", "footwear", "sandal"],
-    "Snacks": ["snack", "chocolate", "candy", "lolly", "biscuit", "chips", "food"],
-    "Electronics": ["electronic", "phone", "laptop", "charger", "cable", "headphone",
-                    "speaker", "camera", "tablet", "gadget"],
-    "Tools": ["tool", "hammer", "spanner", "wrench", "screwdriver", "drill", "pick",
-              "entrenching", "knife", "spacer", "tow pin"],
-    "Metal detectors": ["metal detector", "minelab", "gold monster", "gpz", "coil",
-                         "gpx", "vanquish", "equinox"],
-    "Battery items": ["battery", "batteries", "jump starter", "power bank", "powerbank"],
-    "Personal items": ["personal", "hand bag", "handbag", "bag", "cosmetic", "perfume",
-                       "toiletr"],
+    "Vitamins": ["vitamin", "supplement", "omega", "fish oil", "collagen",
+                 "magnesium", "probiotic", "multivitamin"],
+    "Shoes": ["shoe", "boot", "sneaker", "footwear", "sandal", "heel", "loafer"],
+    "Clothing": ["clothes", "clothing", "shirt", "t-shirt", "tshirt", "tee",
+                 "jacket", "pant", "trouser", "dress", "hoodie", "apparel",
+                 "garment", "jeans", "coat", "sweater", "jumper", "skirt",
+                 "shorts", "socks", "underwear"],
+    "Metal Detectors": ["metal detector", "minelab", "gold monster", "gpz",
+                         "gpx", "vanquish", "equinox", "detector", "search coil"],
+    "Electronic Devices with Lithium Batteries": [
+        "power bank", "powerbank", "jump starter", "lithium", "li-ion", "li ion",
+        "lipo", "drone", "e-bike", "ebike", "scooter battery", "battery pack"],
+    "Electronics": ["electronic", "phone", "laptop", "charger", "cable",
+                    "headphone", "speaker", "camera", "tablet", "gadget",
+                    "adapter", "mouse", "keyboard", "monitor", "router"],
+    "Snacks": ["snack", "chocolate", "candy", "lolly", "biscuit", "chips",
+               "food", "coffee", "tea", "honey", "noodle"],
+    "Tools": ["tool", "hammer", "spanner", "wrench", "screwdriver", "drill",
+              "pick", "entrenching", "knife", "spacer", "tow pin", "pliers"],
+    "Personal Items": ["personal", "hand bag", "handbag", "bag", "cosmetic",
+                       "perfume", "toiletr", "makeup", "skincare", "shampoo"],
 }
 
-_QTY_PREFIX = re.compile(r"^\s*(\d+)\s*[x*]\s*", re.IGNORECASE)
-_QTY_SUFFIX = re.compile(r"\s*[x*]\s*(\d+)\s*$|\s*\((\d+)\)\s*$|\s+(\d+)\s*(?:pcs|pc|units?)\s*$",
+_QTY_PREFIX = re.compile(r"^\s*(\d+)\s*[x*]\s+", re.IGNORECASE)
+# The "x"/"*" multiplier must be space-separated so words like "Box 3" are not
+# misread as "Bo" + "x3".
+_QTY_SUFFIX = re.compile(r"\s+[x*]\s*(\d+)\s*$|\s*\((\d+)\)\s*$|\s+(\d+)\s*(?:pcs|pc|units?)\s*$",
                          re.IGNORECASE)
+
+# --- description cleaning (strip serials, sizes, box/parcel refs, stray numbers) ---
+_SIZE_RE = re.compile(r"\b(?:size|sz|us|eu|uk)\s*[-:]?\s*\d+(?:\.\d+)?\b", re.IGNORECASE)
+_BOXREF_RE = re.compile(r"\b(?:box|carton|parcel|pkg|package|ctn|pallet|bag)\s*#?\s*\d+\b",
+                        re.IGNORECASE)
+_HASHNUM_RE = re.compile(r"#\s*\d+")
+_UNITNUM_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:wh|v|mah|kg|g|gram|ml|l|cm|mm|inch|in|pcs|pc)\b",
+                         re.IGNORECASE)
+_SERIAL_RE = re.compile(r"\b(?=[a-z0-9-]*\d)(?=[a-z0-9-]*[a-z])[a-z0-9]{2,}(?:-[a-z0-9]+)*\b",
+                        re.IGNORECASE)  # mixed letter+digit tokens e.g. GPZ7000, X100
+_STRAYNUM_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
+_PUNCT_RE = re.compile(r"\s*[-–—:,/]+\s*$")
+# Noise tokens commonly left over from serial/model labelling.
+_STOPWORDS = {"serial", "sn", "model", "mdl", "no", "nos", "ref", "code",
+              "item", "type", "ver", "version"}
+
+
+def _clean_description(name: str) -> str:
+    """Strip serial numbers, sizes, box/parcel refs and stray numbers, then
+    de-duplicate words and Title-case the result for a clean invoice line."""
+    s = " " + (name or "").strip() + " "
+    s = _SIZE_RE.sub(" ", s)
+    s = _BOXREF_RE.sub(" ", s)
+    s = _HASHNUM_RE.sub(" ", s)
+    s = _UNITNUM_RE.sub(" ", s)
+    s = _SERIAL_RE.sub(" ", s)
+    s = _STRAYNUM_RE.sub(" ", s)
+    # collapse whitespace and drop duplicate words (case-insensitive, keep order)
+    words, seen = [], set()
+    for w in s.split():
+        key = w.lower()
+        if key in seen or key in _STOPWORDS:
+            continue
+        seen.add(key)
+        words.append(w)
+    cleaned = " ".join(words).strip()
+    cleaned = _PUNCT_RE.sub("", cleaned).strip()
+    if not cleaned:
+        return ""
+    # Title-case while preserving existing all-caps acronyms
+    return " ".join(w if w.isupper() and len(w) > 1 else w.capitalize()
+                    for w in cleaned.split())
 
 
 def _categorise(desc: str) -> Optional[str]:
@@ -334,8 +440,13 @@ def summarise_items(parcels: list[dict]) -> list[dict]:
             share = value
         for name, qty in items:
             cat = _categorise(name)
-            key = cat or name.strip().lower()
-            label = cat or name.strip()
+            if cat:
+                key, label = cat.lower(), cat
+            else:
+                cleaned = _clean_description(name)
+                if not cleaned:
+                    continue
+                key, label = cleaned.lower(), cleaned
             if key not in agg:
                 agg[key] = {"description": label, "qty": 0, "amount": 0.0}
                 order.append(key)
@@ -709,7 +820,12 @@ def get_packing_list(date: str):
 def save_packing_list(payload: PackingListIn, request: Request):
     require_admin(request)
     bd = _parse_date(payload.batch_date)
-    clean = []
+    # Build the line items, merging any rows that share the same description
+    # (case-insensitive) so an admin can merge categories simply by renaming
+    # two lines to the same label. Quantities and amounts are summed and the
+    # unit price is recomputed from the merged totals.
+    merged: dict[str, dict] = {}
+    order: list[str] = []
     for it in payload.items:
         desc = str(it.get("description", "")).strip()
         if not desc:
@@ -718,8 +834,20 @@ def save_packing_list(payload: PackingListIn, request: Request):
         unit = float(it.get("unit_price") or 0)
         amount = it.get("amount")
         amount = float(amount) if amount not in (None, "") else round(qty * unit, 2)
-        clean.append({"description": desc, "qty": qty,
-                      "unit_price": unit, "amount": round(amount, 2)})
+        key = desc.lower()
+        if key not in merged:
+            merged[key] = {"description": desc, "qty": 0.0, "amount": 0.0}
+            order.append(key)
+        merged[key]["qty"] += qty
+        merged[key]["amount"] += amount
+    clean = []
+    for key in order:
+        row = merged[key]
+        qty = round(row["qty"], 2)
+        amount = round(row["amount"], 2)
+        unit = round(amount / qty, 2) if qty else 0.0
+        clean.append({"description": row["description"], "qty": qty,
+                      "unit_price": unit, "amount": amount})
     total_amount = round(sum(i["amount"] for i in clean), 2)
     with Session(_engine) as s:
         pkgs = list(s.scalars(select(Package).where(Package.batch_date == bd)).all())

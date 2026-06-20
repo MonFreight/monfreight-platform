@@ -1107,8 +1107,12 @@
     <section class="card">
       <div class="card-head-row">
         <h2>Packing List / Invoice</h2>
-        <button class="btn small admin-only" id="prepReSummariseBtn">↻ Auto-summarise items</button>
+        <div class="prep-items-actions admin-only">
+          <button class="btn small" id="prepReSummariseBtn">↻ Auto-summarise items</button>
+          <button class="btn small ghost" id="prepMergeItemsBtn">⤵ Merge duplicates</button>
+        </div>
       </div>
+      <p class="muted small" style="margin-top:0;">Review the auto-summarised English categories below. Edit descriptions, merge or split categories, and adjust quantities &amp; values before generating the PDF.</p>
       <div class="table-wrap">
         <table class="dataTable" id="prepItemsTable">
           <thead>

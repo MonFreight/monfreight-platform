@@ -366,6 +366,33 @@
     } catch (e) { notify("Could not re-summarise", "err"); }
   }
 
+  function mergeDuplicateItems() {
+    const map = new Map();
+    const order = [];
+    state.items.forEach(it => {
+      const key = (it.description || "").trim().toLowerCase();
+      if (!key) return;
+      if (!map.has(key)) {
+        map.set(key, { description: (it.description || "").trim(), qty: 0, unit_price: 0, amount: 0 });
+        order.push(key);
+      }
+      const cur = map.get(key);
+      cur.qty += Number(it.qty) || 0;
+      cur.amount += Number(it.amount) || 0;
+    });
+    const before = state.items.length;
+    state.items = order.map(k => {
+      const row = map.get(k);
+      row.qty = +row.qty.toFixed(2);
+      row.amount = +row.amount.toFixed(2);
+      row.unit_price = row.qty ? +(row.amount / row.qty).toFixed(2) : 0;
+      return row;
+    });
+    renderItems();
+    const removed = before - state.items.length;
+    notify(removed > 0 ? `Merged ${removed} duplicate line(s)` : "No duplicate descriptions to merge");
+  }
+
   async function savePackingList() {
     const body = {
       batch_date: state.date,
@@ -395,6 +422,7 @@
     });
     q("#prepUnassignBtn")?.addEventListener("click", () => assignSelected(null));
     q("#prepReSummariseBtn")?.addEventListener("click", reSummarise);
+    q("#prepMergeItemsBtn")?.addEventListener("click", mergeDuplicateItems);
     q("#prepAddItemBtn")?.addEventListener("click", () => {
       state.items.push({ description: "", qty: 1, unit_price: 0, amount: 0 });
       renderItems();
