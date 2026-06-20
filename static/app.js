@@ -79,6 +79,7 @@ function switchPanel(name) {
   if (name === "settings")  loadSettings();
   if (name === "activity")  loadActivityPanel();
   if (name === "sms")       loadSMSPanel();
+  if (name === "prep" && typeof loadPrep === "function") loadPrep();
 
   // Sync the labels panel selection state
   if (name === "labels") syncLabelsPanel();

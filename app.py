@@ -94,6 +94,7 @@ class Shipment(Base):
     delivery_note = Column(String, default="")
     notes = Column(String, default="")
     link_group = Column(Integer, nullable=True)
+    package_id = Column(Integer, nullable=True, index=True)
 
     created_at = Column(DateTime, default=dt.datetime.now)
 
@@ -113,6 +114,7 @@ def _ensure_columns():
         ("total_override", "ALTER TABLE shipments ADD COLUMN total_override BOOLEAN DEFAULT 0"),
         ("extra_charges", "ALTER TABLE shipments ADD COLUMN extra_charges FLOAT DEFAULT 0"),
         ("link_group",    "ALTER TABLE shipments ADD COLUMN link_group INTEGER DEFAULT NULL"),
+        ("package_id",    "ALTER TABLE shipments ADD COLUMN package_id INTEGER DEFAULT NULL"),
     ]
     with engine.connect() as conn:
         try:
@@ -415,10 +417,12 @@ from auth import init_auth                      # noqa: E402
 from backup import init_backup                  # noqa: E402
 from activity_log import init_activity_log, log_activity, router as activity_router  # noqa: E402
 from sms import init_sms, router as sms_router  # noqa: E402
+from shipment_prep import init_prep              # noqa: E402
 init_auth(app, engine, templates)
 init_backup(app, engine)
 init_activity_log(engine)
 init_sms(engine)
+init_prep(app, engine, templates, Shipment)
 app.include_router(activity_router)
 app.include_router(sms_router)
 

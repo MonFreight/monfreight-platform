@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ title }} — {{ doc.batch_date }}</title>
+<link rel="stylesheet" href="/static/prep_print.css?v=1">
+</head>
+<body class="packing-doc">
+
+<div class="actions no-print">
+  <button onclick="window.print()" class="big-btn">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" class="big-btn ghost">Close</button>
+  <span class="hint">Tip: choose “Save as PDF”, A4 portrait.</span>
+</div>
+
+<section class="pl-sheet">
+
+  <!-- Header -->
+  <table class="pl-header">
+    <tr>
+      <td class="pl-logo-cell">
+        <img src="/static/logo.png" class="pl-logo" onerror="this.style.display='none'">
+      </td>
+      <td class="pl-to-cell">
+        <div class="pl-to">To : {{ doc.to_party }}</div>
+        <div class="pl-date">{{ doc.doc_date }}</div>
+      </td>
+    </tr>
+  </table>
+
+  <h1 class="pl-title">{{ title }}</h1>
+
+  <!-- Shipper / Consignee -->
+  <table class="pl-parties">
+    <tr>
+      <td class="pl-party-label">Shipper:</td>
+      <td class="pl-party-val"><pre>{{ doc.shipper }}</pre></td>
+    </tr>
+    <tr>
+      <td class="pl-party-label">Consignee:</td>
+      <td class="pl-party-val"><pre>{{ doc.consignee }}</pre></td>
+    </tr>
+  </table>
+
+  <!-- Items -->
+  <table class="pl-items">
+    <thead>
+      <tr>
+        <th class="c-item">ITEM</th>
+        <th class="c-qt">Q/T</th>
+        <th class="c-up">U/Price/AUD</th>
+        <th class="c-amt">Amount/AUD</th>
+        <th class="c-box">Box pcs</th>
+        <th class="c-wt">Gross Weight</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set nrows = doc['items']|length %}
+      {% for it in doc['items'] %}
+      <tr>
+        <td class="c-item">{{ it.description }}</td>
+        <td class="c-qt">{{ it.qty|int }}</td>
+        <td class="c-up">$&nbsp;&nbsp;{{ "%.2f"|format(it.unit_price) }}</td>
+        <td class="c-amt">$&nbsp;&nbsp;{{ "%.2f"|format(it.amount) }}</td>
+        {% if loop.first %}
+        <td class="c-box" rowspan="{{ nrows }}">{{ doc.total_parcels }} pcs</td>
+        <td class="c-wt" rowspan="{{ nrows }}">{{ "%g"|format(doc.total_weight) }}Kgs</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      <tr class="pl-total-row">
+        <td class="c-item">Total</td>
+        <td></td><td></td>
+        <td class="c-amt">${{ "{:,.0f}".format(doc.total_amount) }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="pl-foot">
+    <span class="pl-foot-name">Name: <u>{{ doc.signer_name }}</u></span>
+    <span class="pl-foot-sig">Signature …......................</span>
+    <span class="pl-foot-date">Date: {{ doc.doc_date }}</span>
+  </div>
+
+  <div class="pl-totals-note">
+    Total packages: {{ doc.total_packages }} &nbsp;·&nbsp;
+    Total parcels: {{ doc.total_parcels }} &nbsp;·&nbsp;
+    Total shipment weight: {{ "%g"|format(doc.total_weight) }} kg
+  </div>
+
+</section>
+
+<script>
+window.addEventListener("load", () => {
+  {% if auto_print %}setTimeout(() => window.print(), 350);{% endif %}
+});
+</script>
+</body>
+</html>

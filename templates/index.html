@@ -5,6 +5,7 @@
 <title>Mon Freight — Logistics Management</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/static/style.css?v={{ _v }}">
+<link rel="stylesheet" href="/static/prep.css?v={{ _v }}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/themes/airbnb.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -29,6 +30,7 @@
     <a href="#" data-panel="shipments">Shipments</a>
     <a href="#" data-panel="customers">Customers</a>
     <a href="#" data-panel="labels">Labels &amp; Print</a>
+    <a href="#" data-panel="prep">Shipment Prep</a>
     <a href="#" data-panel="reports">Reports</a>
     <a href="#" data-panel="sms" id="navSMS" style="display:none;">Send SMS</a>
     <a href="#" data-panel="activity" id="navActivity" style="display:none;">Activity Logs</a>
@@ -1027,6 +1029,162 @@
   </div>
 </section>
 
+<!-- ================================================================
+     PANEL: SHIPMENT PREPARATION
+     ================================================================ -->
+<section class="panel" id="panel-prep">
+  <div class="panel-head">
+    <h1>Shipment Preparation</h1>
+    <p class="muted">Build a consolidated export shipment for a Batch Date — packages, parcel assignment, outer labels and the Packing List / Invoice.</p>
+  </div>
+
+  <!-- Batch selector + readiness -->
+  <section class="card prep-toolbar">
+    <label class="prep-batch-pick">📋 Batch Date
+      <input type="text" id="prepBatchDate" placeholder="Select a batch date">
+    </label>
+    <span id="prepReadiness" class="prep-readiness">—</span>
+    <span id="prepRoleNote" class="muted small" style="margin-left:auto;"></span>
+  </section>
+
+  <div id="prepEmpty" class="card">
+    <p class="muted" style="padding:8px 0;">Pick a Batch Date above to start preparing the shipment.</p>
+  </div>
+
+  <div id="prepContent" class="hidden">
+
+    <!-- Dashboard KPIs -->
+    <section class="card">
+      <h2>Dashboard</h2>
+      <div class="prep-kpis" id="prepKpis"></div>
+      <div id="prepWarnings" class="prep-warnings"></div>
+    </section>
+
+    <!-- Packages -->
+    <section class="card">
+      <div class="card-head-row">
+        <h2>Packages <span class="muted small" id="prepPkgCount"></span></h2>
+        <button class="btn primary admin-only" id="prepAddPkgBtn">➕ New Package</button>
+      </div>
+      <div class="table-wrap">
+        <table class="dataTable" id="prepPkgTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Type</th><th>Ref</th><th>Parcels</th>
+              <th class="num">Gross kg</th><th>Dims (cm)</th>
+              <th class="num">Value AU$</th><th>Battery</th><th>Status</th>
+              <th class="admin-only">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="prepPkgRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Parcel assignment -->
+    <section class="card">
+      <div class="card-head-row">
+        <h2>Assign Parcels</h2>
+        <span class="muted small" id="prepUnassignedNote"></span>
+      </div>
+      <div class="prep-assign-grid">
+        <div>
+          <div class="prep-col-head">Parcels in this batch</div>
+          <div class="prep-parcel-list" id="prepParcelList"></div>
+        </div>
+        <div class="prep-assign-controls admin-only">
+          <label class="small">Move selected to:
+            <select id="prepAssignTarget"></select>
+          </label>
+          <button class="btn primary small" id="prepAssignBtn">Assign →</button>
+          <button class="btn small" id="prepUnassignBtn">Unassign</button>
+          <p class="muted small">Tick parcels on the left, choose a package, then Assign. A parcel can only live in one package.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Packing list / invoice -->
+    <section class="card">
+      <div class="card-head-row">
+        <h2>Packing List / Invoice</h2>
+        <button class="btn small admin-only" id="prepReSummariseBtn">↻ Auto-summarise items</button>
+      </div>
+      <div class="table-wrap">
+        <table class="dataTable" id="prepItemsTable">
+          <thead>
+            <tr><th>Item description</th><th class="num">Q/T</th><th class="num">Unit AU$</th><th class="num">Amount AU$</th><th class="admin-only"></th></tr>
+          </thead>
+          <tbody id="prepItemRows"></tbody>
+          <tfoot>
+            <tr>
+              <td class="admin-only"><button class="btn small ghost" id="prepAddItemBtn">+ Add line</button></td>
+              <td class="num"><strong id="prepItemsQty">0</strong></td>
+              <td class="num muted small">Total</td>
+              <td class="num"><strong id="prepItemsTotal">$0</strong></td>
+              <td class="admin-only"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="prep-pl-meta admin-only">
+        <label class="small">Signer name <input type="text" id="prepSignerName" placeholder="Name on document"></label>
+        <label class="small">Document date <input type="text" id="prepDocDate" placeholder="d/m/yyyy"></label>
+        <button class="btn primary" id="prepSavePLBtn">💾 Save &amp; generate</button>
+        <span class="muted small" id="prepPLStatus"></span>
+      </div>
+    </section>
+
+    <!-- Documents -->
+    <section class="card">
+      <h2>Generate Documents (PDF)</h2>
+      <p class="muted small" style="margin-top:0;">Each opens a print-ready page — choose “Save as PDF” in the print dialog.</p>
+      <div class="prep-doc-btns">
+        <a class="btn" id="prepDocLabels" target="_blank">🏷 Outer Package Labels</a>
+        <a class="btn" id="prepDocPacking" target="_blank">📦 Packing List</a>
+        <a class="btn" id="prepDocInvoice" target="_blank">🧾 Commercial Invoice</a>
+        <a class="btn" id="prepDocSummary" target="_blank">📊 Shipment Summary</a>
+      </div>
+    </section>
+
+  </div>
+</section>
+
+<!-- Package create/edit modal -->
+<div class="modal hidden" id="prepPkgModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3 id="prepPkgModalTitle">New Package</h3>
+      <button class="modal-close" id="prepPkgModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="prep-form-grid">
+        <label>Package type
+          <select id="pkgType">
+            <option>Carton</option><option>Pallet</option><option>Bag</option>
+            <option>Crate</option><option>Box</option><option>Envelope</option>
+          </select>
+        </label>
+        <label>Status
+          <select id="pkgStatus">
+            <option>Open</option><option>Packed</option><option>Ready for Shipment</option>
+          </select>
+        </label>
+        <label>Gross weight (kg)<input type="number" step="0.01" id="pkgWeight"></label>
+        <label>Reference No.<input type="text" id="pkgRef" placeholder="(auto)"></label>
+        <label>Length (cm)<input type="number" step="0.1" id="pkgL"></label>
+        <label>Width (cm)<input type="number" step="0.1" id="pkgW"></label>
+        <label>Height (cm)<input type="number" step="0.1" id="pkgH"></label>
+        <label>Parcels override<input type="number" id="pkgManual" placeholder="(auto)"></label>
+        <label class="span2">Notes / handling remarks<input type="text" id="pkgNotes"></label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="prepPkgCancel">Cancel</button>
+      <button type="button" class="btn primary" id="prepPkgSave">Save Package</button>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <!-- ================================================================
@@ -1262,5 +1420,6 @@
   window.FILTER_END    = {{ end_d   | tojson | safe }};
 </script>
 <script src="/static/app.js?v={{ _v }}"></script>
+<script src="/static/prep.js?v={{ _v }}"></script>
 </body>
 </html>

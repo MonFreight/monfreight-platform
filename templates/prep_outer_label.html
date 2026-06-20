@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Outer Package Labels — {{ company.batch_date }}</title>
+<link rel="stylesheet" href="/static/prep_print.css?v=1">
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+</head>
+<body class="outer-label-doc">
+
+<div class="actions no-print">
+  <button onclick="window.print()" class="big-btn">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" class="big-btn ghost">Close</button>
+  <span class="hint">Tip: choose “Save as PDF” as the destination, A4 portrait.</span>
+</div>
+
+{% for p in labels %}
+<section class="olabel">
+
+  <!-- Header: logo + company -->
+  <header class="ol-head">
+    <img src="/static/logo.png" class="ol-logo" onerror="this.style.display='none'">
+    <div class="ol-co">
+      <div class="ol-co-name">MON FREIGHT PTY LTD</div>
+      <div class="ol-co-sub">ABN 88679480098 · Air Cargo Australia → Mongolia</div>
+      <div class="ol-co-sub">907/52 Bank Street, West End QLD 4101 · +61 7 3193 3458</div>
+      <div class="ol-co-sub">info@monfreight.com.au</div>
+    </div>
+    <div class="ol-pkgbox">
+      <div class="ol-pkg-label">PACKAGE</div>
+      <div class="ol-pkg-num">{{ p.package_number }} <span>of</span> {{ total_count }}</div>
+      <div class="ol-pkg-type">{{ p.package_type }}</div>
+    </div>
+  </header>
+
+  <!-- Destination strip -->
+  <div class="ol-dest">
+    <span class="ol-dest-label">DESTINATION</span>
+    <span class="ol-dest-val">{{ company.destination|upper }}</span>
+    <span class="ol-batch">BATCH {{ company.batch_date }}</span>
+  </div>
+
+  <!-- Consignee + meta -->
+  <div class="ol-body">
+    <div class="ol-consignee">
+      <div class="ol-sec-title">CONSIGNEE</div>
+      <pre class="ol-pre">{{ company.consignee }}</pre>
+    </div>
+    <div class="ol-meta">
+      <table class="ol-meta-tbl">
+        <tr><th>Reference No.</th><td>{{ p.reference_number }}</td></tr>
+        <tr><th>Gross Weight</th><td>{{ "%.2f"|format(p.gross_weight) }} kg</td></tr>
+        <tr><th>Dimensions</th><td>{{ "%g"|format(p.length_cm) }} × {{ "%g"|format(p.width_cm) }} × {{ "%g"|format(p.height_cm) }} cm</td></tr>
+        <tr><th>Parcels inside</th><td>{{ p.parcel_count_manual if p.parcel_count_manual is not none else p.parcel_count }}</td></tr>
+        <tr><th>Declared value</th><td>AU$ {{ "%.2f"|format(p.total_declared_value) }}</td></tr>
+        <tr><th>Status</th><td>{{ p.status }}</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Item summary -->
+  {% if p.item_summary %}
+  <div class="ol-items">
+    <div class="ol-sec-title">CONTENTS SUMMARY</div>
+    <div class="ol-items-list">
+      {% for it in p.item_summary %}<span class="ol-chip">{{ it.description }} × {{ it.qty|int }}</span>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Battery section -->
+  {% if p.battery and p.battery.present %}
+  <div class="ol-battery">
+    <div class="ol-bat-flag">⚠ LITHIUM BATTERY</div>
+    <div class="ol-bat-body">
+      <table class="ol-bat-tbl">
+        {% if p.battery.un_numbers %}<tr><th>UN</th><td>{{ p.battery.un_numbers|join(", ") }}</td></tr>{% endif %}
+        {% if p.battery.pi_sections %}<tr><th>Packing Instruction</th><td>{{ p.battery.pi_sections|join(", ") }}</td></tr>{% endif %}
+        {% if p.battery.packing_types %}<tr><th>Type</th><td>{{ p.battery.packing_types|join("; ") }}</td></tr>{% endif %}
+        {% if p.battery.capacity_wh %}<tr><th>Capacity</th><td>{{ p.battery.capacity_wh|join(", ") }}</td></tr>{% endif %}
+        {% if p.battery.voltage %}<tr><th>Voltage</th><td>{{ p.battery.voltage|join(", ") }}</td></tr>{% endif %}
+        {% if p.battery.mah %}<tr><th>mAh</th><td>{{ p.battery.mah|join(", ") }}</td></tr>{% endif %}
+        {% if p.battery.conditions %}<tr><th>Condition</th><td>{{ p.battery.conditions|join(", ") }}</td></tr>{% endif %}
+        <tr><th>Battery parcels</th><td>{{ p.battery.parcel_count }}</td></tr>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Handling + codes -->
+  <footer class="ol-foot">
+    <div class="ol-handling">
+      <div class="ol-sec-title">HANDLING</div>
+      <div class="ol-handle-icons">
+        <span class="ol-handle">↑↑ THIS WAY UP</span>
+        <span class="ol-handle">☂ KEEP DRY</span>
+        <span class="ol-handle">⚯ FRAGILE</span>
+      </div>
+      {% if p.notes %}<div class="ol-handle-note">{{ p.notes }}</div>{% endif %}
+    </div>
+    <div class="ol-codes">
+      <div class="ol-qr" data-qr="/prep/package/{{ p.id }}/label.html"></div>
+      <svg class="ol-barcode" data-code="{{ p.reference_number }}"></svg>
+      <div class="ol-ref-text">{{ p.reference_number }}</div>
+    </div>
+  </footer>
+
+</section>
+{% endfor %}
+
+<script>
+window.addEventListener("load", () => {
+  // Barcodes
+  document.querySelectorAll(".ol-barcode").forEach(el => {
+    const code = el.dataset.code || "";
+    if (!code || !window.JsBarcode) return;
+    try { JsBarcode(el, code, { format: "CODE128", width: 1.5, height: 36,
+                                displayValue: false, margin: 0 }); }
+    catch (e) { console.warn("barcode failed", e); }
+  });
+  // QR codes — encode an absolute URL to the package record
+  document.querySelectorAll(".ol-qr").forEach(el => {
+    const path = el.dataset.qr || "";
+    const url = window.location.origin + path;
+    if (!window.QRCode) return;
+    try { new QRCode(el, { text: url, width: 96, height: 96,
+                           correctLevel: QRCode.CorrectLevel.M }); }
+    catch (e) { console.warn("qr failed", e); }
+  });
+  {% if auto_print %}setTimeout(() => window.print(), 450);{% endif %}
+});
+</script>
+</body>
+</html>
