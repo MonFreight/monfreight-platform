@@ -14,6 +14,11 @@
   const notify = (m, k) => (window.toast ? window.toast(m, k) : console.log(m));
   const money = (n) => "$" + (Number(n) || 0).toLocaleString(undefined,
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Trim trailing zeros from a measurement, e.g. 30.0 -> "30", 30.50 -> "30.5".
+  const fmtNum = (n) => {
+    const v = Number(n) || 0;
+    return Number.isInteger(v) ? String(v) : String(parseFloat(v.toFixed(2)));
+  };
 
   const state = {
     date: null, isAdmin: false,
@@ -135,17 +140,27 @@
     const total = state.packages.length;
     q("#prepPkgCount").textContent = total ? `(${total})` : "";
     const rows = state.packages.map(p => {
-      const dims = `${p.length_cm || 0}×${p.width_cm || 0}×${p.height_cm || 0}`;
+      const L = p.length_cm || 0, W = p.width_cm || 0, H = p.height_cm || 0;
+      const dims = `${fmtNum(L)} × ${fmtNum(W)} × ${fmtNum(H)} cm`;
+      // Volume in m³ (cm³ / 1,000,000), shown to 3 dp when there are real dims.
+      const volM3 = (L * W * H) / 1e6;
+      const volLine = volM3 > 0
+        ? `<span class="prep-vol">${volM3.toLocaleString(undefined,{minimumFractionDigits:3,maximumFractionDigits:3})} m³</span>`
+        : `<span class="prep-vol muted">—</span>`;
+      const dimsCell = `${volLine}<span class="prep-dims">${dims}</span>`;
+      // Assigned box references for this carton, e.g. "Boxes 1, 3, 5, 7".
+      const boxes = (p.box_numbers && p.box_numbers.length)
+        ? `<span class="prep-boxes" title="Boxes assigned to this carton">${p.box_numbers.join(", ")}</span>`
+        : `<span class="muted">—</span>`;
       const bat = (p.battery && p.battery.present)
         ? `<span class="prep-bat-badge">⚠ ${p.battery.un_numbers && p.battery.un_numbers.length ? p.battery.un_numbers.join(",") : "Battery"}</span>` : "—";
-      const pcount = p.parcel_count_manual != null ? p.parcel_count_manual : p.parcel_count;
       return `<tr>
         <td><strong>${p.package_number} / ${total}</strong></td>
         <td>${esc(p.package_type)}</td>
-        <td class="small">${esc(p.reference_number)}</td>
-        <td>${pcount}</td>
+        <td>${esc(p.reference_number)}</td>
+        <td>${boxes}</td>
+        <td class="prep-dims-cell">${dimsCell}</td>
         <td class="num">${(p.gross_weight || 0).toLocaleString()}</td>
-        <td class="small">${dims}</td>
         <td class="num">${(p.total_declared_value || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
         <td>${bat}</td>
         <td><span class="prep-status s-${(p.status||'').replace(/\s+/g,'-').toLowerCase()}">${esc(p.status)}</span></td>

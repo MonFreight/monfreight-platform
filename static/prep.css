@@ -37,6 +37,33 @@
 /* packages table */
 .table-wrap { overflow-x: auto; }
 .prep-pkg-actions { white-space: nowrap; }
+
+/* Column widths for the Packages table — override the global .dataTable
+   fixed-width rules (which are sized for the 14-column shipments grid and
+   otherwise truncate Status/Actions and over-widen the numeric columns).
+   Columns: # · Type · Ref · Boxes · Volume/Dimensions · Gross kg · Value ·
+   Battery · Status · Actions. */
+#prepPkgTable { table-layout: auto; }
+#prepPkgTable th, #prepPkgTable td {
+  white-space: nowrap; overflow: visible; text-overflow: clip;
+  vertical-align: middle;
+}
+#prepPkgTable th:nth-child(1),  #prepPkgTable td:nth-child(1)  { width: 64px;  }
+#prepPkgTable th:nth-child(2),  #prepPkgTable td:nth-child(2)  { width: 84px;  }
+#prepPkgTable th:nth-child(3),  #prepPkgTable td:nth-child(3)  { min-width: 150px; white-space: normal; word-break: break-word; }
+#prepPkgTable th:nth-child(4),  #prepPkgTable td:nth-child(4)  { min-width: 120px; white-space: normal; word-break: break-word; }
+#prepPkgTable th:nth-child(5),  #prepPkgTable td:nth-child(5)  { min-width: 168px; white-space: nowrap; }
+#prepPkgTable th:nth-child(6),  #prepPkgTable td:nth-child(6)  { width: 92px;  text-align: right; }
+#prepPkgTable th:nth-child(7),  #prepPkgTable td:nth-child(7)  { width: 110px; text-align: right; }
+#prepPkgTable th:nth-child(8),  #prepPkgTable td:nth-child(8)  { min-width: 96px;  }
+#prepPkgTable th:nth-child(9),  #prepPkgTable td:nth-child(9)  { min-width: 132px; }
+#prepPkgTable th:nth-child(10), #prepPkgTable td:nth-child(10) { width: 168px; white-space: nowrap; text-align: left; }
+
+/* Volume / Dimensions cell — volume on top, dimensions beneath. */
+.prep-dims-cell { line-height: 1.35; }
+.prep-vol { display: block; font-weight: 700; color: var(--ink); }
+.prep-dims { display: block; font-size: 11.5px; color: var(--ink-soft); }
+.prep-boxes { font-weight: 600; color: var(--brand); }
 .prep-status { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
 .prep-status.s-open { background: var(--info-bg); color: var(--info); }
 .prep-status.s-packed { background: var(--accent-soft); color: var(--accent); }

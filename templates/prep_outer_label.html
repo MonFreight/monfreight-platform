@@ -75,7 +75,7 @@
       <div class="ol-field">
         <span class="ol-fi">{{ field_icon('parcels') }}</span>
         <span class="ol-ft"><span class="ol-fl">PARCELS IN PACKAGE:</span>
-          <span class="ol-fv">{{ p.parcel_count_manual if p.parcel_count_manual is not none else p.parcel_count }}</span></span>
+          <span class="ol-fv">{{ p.parcel_count_manual if p.parcel_count_manual is not none else p.parcel_count }}{% if p.box_numbers %} (Boxes {{ p.box_numbers|join(", ") }}){% endif %}</span></span>
       </div>
       <div class="ol-field">
         <span class="ol-fi">{{ field_icon('weight') }}</span>
@@ -84,8 +84,8 @@
       </div>
       <div class="ol-field">
         <span class="ol-fi">{{ field_icon('dims') }}</span>
-        <span class="ol-ft"><span class="ol-fl">DIMENSIONS (L x W x H):</span>
-          <span class="ol-fv">{{ "%g"|format(p.length_cm) }} x {{ "%g"|format(p.width_cm) }} x {{ "%g"|format(p.height_cm) }} cm</span></span>
+        <span class="ol-ft"><span class="ol-fl">DIMENSIONS (L × W × H):</span>
+          <span class="ol-fv">{{ "%g"|format(p.length_cm) }} × {{ "%g"|format(p.width_cm) }} × {{ "%g"|format(p.height_cm) }} cm</span></span>
       </div>
       <div class="ol-field">
         <span class="ol-fi">{{ field_icon('ref') }}</span>

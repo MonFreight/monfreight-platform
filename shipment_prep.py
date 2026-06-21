@@ -266,26 +266,48 @@ def _merge_battery(items: list[dict]) -> Optional[dict]:
     elif "packed" in joined_types:
         packing = "Packed with equipment"
 
-    # Rating string(s): "<count> x <Wh>" per parcel, e.g. "2 x 74Wh".
+    # Rating string(s): aggregate by capacity (Wh), summing the counts across
+    # every parcel/box so identical capacities collapse into a single entry.
+    # e.g. Box 1 "2 x 19.44Wh" + Box 2 "3 x 19.44Wh" -> "5 × 19.44Wh".
     # Prefer an explicit "N x M Wh" written in the note; otherwise fall back
-    # to a separately-detected count + capacity.
-    ratings: list[str] = []
+    # to a separately-detected count + capacity (count defaults to 1).
+    rating_counts: dict[str, float] = {}
+    rating_order: list[str] = []
+
+    def _add_rating(count: float, wh: str) -> None:
+        key = wh.strip()
+        if not key:
+            return
+        if key not in rating_counts:
+            rating_counts[key] = 0
+            rating_order.append(key)
+        rating_counts[key] += count
+
     for i in items:
         raw = i.get("raw", "") or ""
         matched = False
         for m in _RATING_RE.finditer(raw):
-            r = f"{m.group(1)} x {m.group(2)}Wh"
+            try:
+                cnt = float(m.group(1))
+            except (TypeError, ValueError):
+                cnt = 1
+            _add_rating(cnt, m.group(2))
             matched = True
-            if r not in ratings:
-                ratings.append(r)
         if matched:
             continue
         qty = i.get("quantity")
+        try:
+            qn = float(qty) if qty else 1
+        except (TypeError, ValueError):
+            qn = 1
         for w in (i.get("capacity_wh") or []):
-            wc = w.replace(" ", "")            # "74 Wh" -> "74Wh"
-            r = f"{qty} x {wc}" if qty else wc
-            if r not in ratings:
-                ratings.append(r)
+            wval = w.replace("Wh", "").replace("wh", "").replace(" ", "")
+            _add_rating(qn, wval)
+
+    def _fmt_count(c: float) -> str:
+        return str(int(c)) if float(c).is_integer() else str(c)
+
+    ratings = [f"{_fmt_count(rating_counts[k])} × {k}Wh" for k in rating_order]
     rating_display = " · ".join(ratings)
 
     return {
@@ -528,6 +550,7 @@ def _package_totals(session: Session, pkg: Package) -> dict:
         "handling_marks": _split_handling_marks(pkg.handling_marks or ""),
         "parcel_count": len(parcels),
         "parcel_count_manual": pkg.parcel_count_manual,
+        "box_numbers": [p.box_number for p in parcels],
         "total_weight": round(weight, 2),
         "total_declared_value": round(value, 2),
         "parcels": [_parcel_brief(p) for p in parcels],

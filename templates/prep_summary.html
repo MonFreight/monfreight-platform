@@ -34,7 +34,7 @@
 
   <table class="sm-tbl">
     <thead>
-      <tr><th>Pkg #</th><th>Type</th><th>Ref</th><th>Parcels</th><th>Gross kg</th><th>Dims (cm)</th><th>Value AU$</th><th>Battery</th><th>Status</th></tr>
+      <tr><th>Pkg #</th><th>Type</th><th>Ref</th><th>Boxes</th><th>Volume / Dimensions</th><th>Gross kg</th><th>Value AU$</th><th>Battery</th><th>Status</th></tr>
     </thead>
     <tbody>
       {% for p in packages %}
@@ -42,9 +42,13 @@
         <td>{{ p.package_number }} / {{ dash.total_packages }}</td>
         <td>{{ p.package_type }}</td>
         <td>{{ p.reference_number }}</td>
-        <td>{{ p.parcel_count }}</td>
+        <td>{{ p.box_numbers|join(", ") if p.box_numbers else "—" }}</td>
+        <td>
+          {% set vol = (p.length_cm * p.width_cm * p.height_cm) / 1000000 %}
+          {% if vol > 0 %}<div><strong>{{ "%.3f"|format(vol) }} m³</strong></div>{% endif %}
+          <div>{{ "%g"|format(p.length_cm) }} × {{ "%g"|format(p.width_cm) }} × {{ "%g"|format(p.height_cm) }} cm</div>
+        </td>
         <td>{{ "%g"|format(p.gross_weight) }}</td>
-        <td>{{ "%g"|format(p.length_cm) }}×{{ "%g"|format(p.width_cm) }}×{{ "%g"|format(p.height_cm) }}</td>
         <td>{{ "%.2f"|format(p.total_declared_value) }}</td>
         <td>{{ "Yes" if (p.battery and p.battery.present) else "—" }}</td>
         <td>{{ p.status }}</td>
