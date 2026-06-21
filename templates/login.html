@@ -188,6 +188,9 @@ $("#stepPass").addEventListener("submit", async e => {
       username: $("#username").value.trim(),
       password: $("#password").value,
     });
+    // SMS already verified on this device within SMS_TRUST_HOURS → the
+    // server signs us straight in and returns a redirect (no code sent).
+    if (data.redirect) { window.location.href = data.redirect; return; }
     if (data.choose_phone) toPhoneChoice(data);
     else toStep2(data);
   } catch (ex) { showErr(ex.message); }
