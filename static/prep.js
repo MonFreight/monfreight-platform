@@ -114,6 +114,7 @@
         kpi(d.assigned_parcels, "Assigned") +
         kpi(d.unassigned_parcels, "Unassigned", d.unassigned_parcels ? "warn" : "") +
         kpi((d.total_weight).toLocaleString() + " kg", "Total weight") +
+        kpi((Number(d.total_gross_weight) || 0).toLocaleString() + " kg", "Total gross weight") +
         kpi(money(d.total_declared_value), "Declared value") +
         kpi(d.battery_items, "Battery parcels", d.battery_items ? "warn" : "") +
         kpi(d.packing_list_generated ? "✓" : "—", "Packing list");

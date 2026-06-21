@@ -739,6 +739,7 @@ def prep_dashboard(date: str):
         assigned = [p for p in parcels if getattr(p, "package_id", None)]
         unassigned = [p for p in parcels if not getattr(p, "package_id", None)]
         total_weight = sum(float(p.weight or 0) for p in parcels)
+        total_gross_weight = sum(float(p.gross_weight or 0) for p in pkgs)
         total_value = sum(float(p.declared_value or 0) for p in parcels)
         battery_parcels = [p for p in parcels
                            if detect_battery(getattr(p, "notes", "") or "")]
@@ -779,6 +780,7 @@ def prep_dashboard(date: str):
             "assigned_parcels": len(assigned),
             "unassigned_parcels": len(unassigned),
             "total_weight": round(total_weight, 2),
+            "total_gross_weight": round(total_gross_weight, 2),
             "total_declared_value": round(total_value, 2),
             "battery_items": len(battery_parcels),
             "packing_list_generated": bool(pl and pl.generated_at),
