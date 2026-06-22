@@ -1122,6 +1122,16 @@ function openEdit(ship) {
     if (f.type === "checkbox") f.checked = !!v;
     else f.value = v ?? "";
   }
+  // Batch Date is a flatpickr picker with a separate visible (alt) input, so
+  // setting .value directly above does NOT update what the user sees or the
+  // picker's selected day. Push the shipment's existing batch date through
+  // flatpickr's API so the assigned date loads, displays, and stays selected
+  // unless the user intentionally picks a different one.
+  const bdInput = editForm.elements["batch_date"];
+  if (bdInput) {
+    if (bdInput._flatpickr) bdInput._flatpickr.setDate(ship.batch_date || null, false);
+    else bdInput.value = ship.batch_date || "";
+  }
   editForm.elements["price_input"].value  = ship.price_formula || ship.price_aud || "";
   editForm.elements["extra_charges"].value = ship.extra_charges || 0;
   editForm.elements["total_display"].value = (ship.total_aud || 0).toFixed(2);
