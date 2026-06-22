@@ -406,6 +406,7 @@ main {
   flex-wrap: wrap;
 }
 .entry-title h2 { margin: 0; font-size: 15px; }
+.entry-title-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .entry-title code {
   background: var(--accent-soft);
   padding: 2px 6px;
@@ -1324,5 +1325,54 @@ span.flatpickr-weekday { color: var(--brand) !important; }
 @media (max-width: 700px) {
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .stats    { grid-template-columns: 1fr 1fr; }
-  .topbar-actions .btn.ghost { display: none; }
+
+  /* Save space on phones by hiding the desktop-oriented Import button —
+     but keep Logout reachable (it is also a .btn.ghost). */
+  #importBtn { display: none; }
+
+  /* Let all nav links stay reachable via a horizontal swipe instead of
+     overflowing/clipping when they no longer fit on one row. */
+  .topnav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+  }
+  .topnav a { flex: 0 0 auto; }
+
+  /* Stack edit/large modal fields into a single column so inputs are
+     comfortably tappable and legible on a phone. */
+  .modal-grid, .modal-grid fieldset { grid-template-columns: 1fr; }
+  .modal-grid > .span2,
+  .modal-grid > .span3,
+  .modal-grid label.span3 { grid-column: span 1; }
+
+  /* Keep the customer-lookup dropdown inside the viewport on narrow screens. */
+  .autocomplete-list { max-width: calc(100vw - 20px); }
+
+  /* Full-width, easy-to-tap action buttons in modal footers. */
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions .btn { flex: 1 1 auto; }
+
+  /* ----------------------------------------------------------------
+     Mobile view of the Shipment Records table (read-only on phones).
+     Goal: comfortably read customer info on a phone. Everything here
+     is inside the mobile media query, so the desktop view is unchanged.
+     ---------------------------------------------------------------- */
+
+  /* Smooth momentum scrolling + more vertical room for the scroll area. */
+  .rowscroll {
+    -webkit-overflow-scrolling: touch;
+    max-height: 72vh;
+  }
+
+  /* Bigger text and roomier rows so records are legible on a small screen. */
+  #shipTable { font-size: 13px; }
+  #shipTable th, #shipTable td { padding: 11px 10px; }
+
+  /* Hide phone-irrelevant controls so the table is narrower and clearer:
+     column 1 = bulk-select checkbox, column 14 = print/edit actions.
+     All shipment + customer data columns stay visible. */
+  #shipTable th:nth-child(1),  #shipTable td:nth-child(1),
+  #shipTable th:nth-child(14), #shipTable td:nth-child(14) { display: none; }
 }

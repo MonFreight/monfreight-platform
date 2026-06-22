@@ -199,7 +199,13 @@
   <!-- New shipment entry form -->
   <section class="card entry">
     <div class="entry-title">
-      <h2>New Shipment</h2>
+      <div class="entry-title-left">
+        <h2>New Shipment</h2>
+        <button type="button" class="btn ghost small" id="bulkCreateBtn"
+                title="Create several blank shipments at once to fill in later">
+          ➕ Create Multiple Blank
+        </button>
+      </div>
       <span class="muted small">
         Tab → next field &nbsp;·&nbsp; Enter → save &nbsp;·&nbsp;
         Price accepts formulas: <code>=weight*5</code> &nbsp;·&nbsp;
@@ -1221,8 +1227,8 @@
 
         <fieldset class="span3">
           <legend>FROM — Sender</legend>
-          <label>Full Name<input name="sender_name"></label>
-          <label>Phone<input name="sender_phone"></label>
+          <label class="autocomplete-cell">Full Name<input name="sender_name" data-lookup="sender" data-lookup-field="name" autocomplete="off"></label>
+          <label class="autocomplete-cell">Phone<input name="sender_phone" data-lookup="sender" data-lookup-field="phone" autocomplete="off"></label>
           <label>Address<input name="sender_address"></label>
           <label>City<input name="sender_city"></label>
           <label>Country<input name="sender_country"></label>
@@ -1231,8 +1237,8 @@
 
         <fieldset class="span3">
           <legend>TO — Receiver</legend>
-          <label>Full Name<input name="receiver_name"></label>
-          <label>Phone<input name="receiver_phone"></label>
+          <label class="autocomplete-cell">Full Name<input name="receiver_name" data-lookup="receiver" data-lookup-field="name" autocomplete="off"></label>
+          <label class="autocomplete-cell">Phone<input name="receiver_phone" data-lookup="receiver" data-lookup-field="phone" autocomplete="off"></label>
           <label>Address<input name="receiver_address"></label>
           <label>City<input name="receiver_city"></label>
           <label>Country<input name="receiver_country"></label>
@@ -1275,6 +1281,36 @@
     <div class="modal-actions">
       <button type="button" class="btn ghost" id="editCancel">Cancel</button>
       <button type="submit" form="editForm" class="btn primary">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     BULK CREATE (multiple blank shipments) MODAL
+     ================================================================ -->
+<div class="modal hidden" id="bulkCreateModal">
+  <div class="modal-card small">
+    <div class="modal-head">
+      <h3>Create Multiple Blank Shipments</h3>
+      <button class="modal-close" id="bulkCreateClose">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;">
+      <p class="muted small" style="margin:0 0 14px;">
+        Creates several empty box records (with auto box &amp; MF numbers) for the
+        chosen batch date. Useful when one customer is sending many boxes — record
+        them all now and fill in the details later by editing each row.
+      </p>
+      <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Batch date</label>
+      <input type="text" id="bulkCreateDate" class="batch-input" autocomplete="off"
+             style="width:100%;margin-bottom:14px;">
+      <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">How many blank shipments?</label>
+      <input type="number" id="bulkCreateCount" min="1" max="50" step="1" value="5"
+             style="width:100%;padding:7px 10px;border:1.5px solid var(--line);border-radius:var(--radius);font-size:14px;color:var(--text);">
+      <p class="muted small" id="bulkCreateHint" style="margin:10px 0 0;"></p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="bulkCreateCancel">Cancel</button>
+      <button type="button" class="btn primary" id="bulkCreateConfirm">Create Blank Shipments</button>
     </div>
   </div>
 </div>

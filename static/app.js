@@ -1478,6 +1478,99 @@ $("#importGo").addEventListener("click", async () => {
 });
 
 // ============================================================
+// BULK CREATE — multiple blank shipments
+// ============================================================
+
+const bulkCreateModal = $("#bulkCreateModal");
+let bulkDatePickerInited = false;
+
+function _bulkCreateRefreshHint() {
+  const n = parseInt($("#bulkCreateCount")?.value, 10);
+  const hint = $("#bulkCreateHint");
+  if (!hint) return;
+  if (Number.isFinite(n) && n >= 1 && n <= 50) {
+    hint.textContent = `${n} blank box record${n === 1 ? "" : "s"} will be created with auto box & MF numbers.`;
+  } else {
+    hint.textContent = "Enter a number between 1 and 50.";
+  }
+}
+
+function openBulkCreateModal() {
+  if (!bulkCreateModal) return;
+  // Default the batch date to whatever the New Shipment form is using.
+  const newFormDate = $("#newForm")?.elements["batch_date"]?.value || "";
+  const dateInp = $("#bulkCreateDate");
+  if (dateInp) {
+    if (dateInp._flatpickr) dateInp._flatpickr.setDate(newFormDate || null, false);
+    else dateInp.value = newFormDate;
+  }
+  $("#bulkCreateCount").value = "5";
+  _bulkCreateRefreshHint();
+  bulkCreateModal.classList.remove("hidden");
+  if (!bulkDatePickerInited && window.flatpickr && dateInp) {
+    flatpickr(dateInp, {
+      dateFormat: "Y-m-d",
+      altInput: true,
+      altFormat: "D, j M Y",
+      locale: { firstDayOfWeek: 1 },
+      allowInput: true,
+    });
+    if (newFormDate) dateInp._flatpickr.setDate(newFormDate, false);
+    bulkDatePickerInited = true;
+  }
+  setTimeout(() => $("#bulkCreateCount")?.focus(), 60);
+}
+
+function closeBulkCreateModal() { bulkCreateModal?.classList.add("hidden"); }
+
+$("#bulkCreateBtn")?.addEventListener("click", openBulkCreateModal);
+$("#bulkCreateClose")?.addEventListener("click", closeBulkCreateModal);
+$("#bulkCreateCancel")?.addEventListener("click", closeBulkCreateModal);
+$("#bulkCreateCount")?.addEventListener("input", _bulkCreateRefreshHint);
+
+$("#bulkCreateConfirm")?.addEventListener("click", async () => {
+  const date = ($("#bulkCreateDate")?.value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    toast("Please pick a valid batch date (YYYY-MM-DD).", "err");
+    return;
+  }
+  const count = parseInt($("#bulkCreateCount")?.value, 10);
+  if (!Number.isFinite(count) || count < 1) {
+    toast("Please enter how many blank shipments to create (1 or more).", "err");
+    return;
+  }
+  if (count > 50) {
+    toast("You can create at most 50 blank shipments at once.", "err");
+    return;
+  }
+  const btn = $("#bulkCreateConfirm");
+  btn.disabled = true; btn.textContent = "Creating…";
+  try {
+    const res = await fetch("/api/shipments/bulk-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batch_date: date, count }),
+    });
+    if (!res.ok) {
+      const err = await safeJson(res);
+      toast("Create failed — " + formatServerError(err), "err");
+      return;
+    }
+    const created = await res.json();
+    closeBulkCreateModal();
+    toast(`Created ${created.length} blank shipment${created.length === 1 ? "" : "s"} — redirecting to that batch…`);
+    // Redirect to the batch date so the new blank rows appear, ready to edit.
+    setTimeout(() => {
+      window.location = `/?start=${date}&end=${date}`;
+    }, 700);
+  } catch (err) {
+    toast("Create failed: " + err.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Create Blank Shipments";
+  }
+});
+
+// ============================================================
 // DASHBOARD
 // ============================================================
 
@@ -1902,7 +1995,7 @@ function askAutofillConfirmation(inp, item, side) {
   if (side === "sender") fields.push(["sender_postal", "Postcode"]);
   $("#autofillPreview").innerHTML = `
     <p class="muted small" style="margin-top:0;">
-      Apply these <strong>${side}</strong> details to the new shipment?
+      Apply these <strong>${side}</strong> details to this shipment?
     </p>
     <table class="autofill-table">
       ${fields.map(([k, label]) => `<tr><th>${label}</th><td>${escapeHtml(item[k] || "—")}</td></tr>`).join("")}

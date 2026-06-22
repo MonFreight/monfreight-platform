@@ -289,6 +289,14 @@ class IdsPayload(BaseModel):
     ids: list[int]
 
 
+class BulkCreateIn(BaseModel):
+    """Create several blank shipments at once for a given batch date.
+    Each gets an auto-assigned box number + MF number; all other fields use
+    their model defaults so staff can fill in the details later."""
+    batch_date: dt.date
+    count: int = 1
+
+
 class ShipmentPatch(BaseModel):
     """Partial update for inline edits."""
     batch_date: Optional[dt.date] = None
@@ -612,6 +620,46 @@ def create_shipment(payload: ShipmentIn, request: Request):
         log_activity(_username(request), "shipment_created",
                      f"MF: {ship.mf_number}, batch: {ship.batch_date}, "
                      f"sender: {ship.sender_name}, receiver: {ship.receiver_name}",
+                     _client_ip(request))
+        return result
+
+
+@app.post("/api/shipments/bulk-create")
+def bulk_create_shipments(payload: BulkCreateIn, request: Request):
+    """Create N blank shipments for a batch date so staff can record several
+    boxes from the same customer first and fill in details afterwards.
+    Box numbers are auto-assigned sequentially from the next free number."""
+    count = payload.count
+    if not isinstance(count, int) or count < 1:
+        raise HTTPException(400, "Number of shipments must be a whole number of 1 or more.")
+    if count > 50:
+        raise HTTPException(400, "You can create at most 50 blank shipments at once.")
+    created = []
+    with Session(engine) as s:
+        start_box = next_box_for(s, payload.batch_date)
+        for i in range(count):
+            box = start_box + i
+            ship = Shipment(
+                batch_date=payload.batch_date,
+                box_number=box,
+                mf_number=mf_for(payload.batch_date, box),
+            )
+            s.add(ship)
+            created.append(ship)
+        try:
+            s.commit()
+        except Exception as e:
+            s.rollback()
+            raise HTTPException(400,
+                f"Could not create blank shipments — a box or MF number may "
+                f"already exist for {payload.batch_date.isoformat()}. "
+                f"({e.__class__.__name__})")
+        for ship in created:
+            s.refresh(ship)
+        result = [to_dict(sh) for sh in created]
+        log_activity(_username(request), "shipments_bulk_created",
+                     f"count: {len(created)}, batch: {payload.batch_date}, "
+                     f"boxes: {created[0].box_number}–{created[-1].box_number}",
                      _client_ip(request))
         return result
 
