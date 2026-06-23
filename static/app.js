@@ -55,7 +55,23 @@ function _buildLgMap(rows) {
 let sortKey = "batch_date";
 let sortDir = "desc";
 
-const selectedIds = new Set();
+// Selections persist across page navigation (server-side pagination reloads
+// the page) and the browser tab session via sessionStorage, so users can pick
+// shipments from multiple pages without losing earlier selections.
+const SELECTION_KEY = "mf_selected_ids";
+function _loadSelection() {
+  try {
+    const raw = sessionStorage.getItem(SELECTION_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw).map(Number).filter(Number.isFinite);
+  } catch (_) { return []; }
+}
+function persistSelection() {
+  try {
+    sessionStorage.setItem(SELECTION_KEY, JSON.stringify(Array.from(selectedIds)));
+  } catch (_) { /* ignore quota / privacy-mode errors */ }
+}
+const selectedIds = new Set(_loadSelection());
 
 // ============================================================
 // SECTION / PANEL NAVIGATION
@@ -391,6 +407,7 @@ function renderTable() {
 // ============================================================
 
 function updateSelectionUI() {
+  persistSelection();
   const n = selectedIds.size;
 
   // Shipments panel buttons
