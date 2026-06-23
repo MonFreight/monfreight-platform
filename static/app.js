@@ -59,6 +59,7 @@ let sortDir = "desc";
 // the page) and the browser tab session via sessionStorage, so users can pick
 // shipments from multiple pages without losing earlier selections.
 const SELECTION_KEY = "mf_selected_ids";
+const SELECTION_DATA_KEY = "mf_selected_data";
 function _loadSelection() {
   try {
     const raw = sessionStorage.getItem(SELECTION_KEY);
@@ -66,10 +67,33 @@ function _loadSelection() {
     return JSON.parse(raw).map(Number).filter(Number.isFinite);
   } catch (_) { return []; }
 }
+function _loadSelectionData() {
+  try { return JSON.parse(sessionStorage.getItem(SELECTION_DATA_KEY)) || {}; }
+  catch (_) { return {}; }
+}
+// Cached per-row figures (weight / freight / paid) for every selected shipment,
+// keyed by id. Lets the selection summary total across ALL pages, not just the
+// rows currently rendered on the visible page.
+const selectedData = _loadSelectionData();
 function persistSelection() {
   try {
     sessionStorage.setItem(SELECTION_KEY, JSON.stringify(Array.from(selectedIds)));
+    sessionStorage.setItem(SELECTION_DATA_KEY, JSON.stringify(selectedData));
   } catch (_) { /* ignore quota / privacy-mode errors */ }
+}
+// Refresh the cache from the current page's rows and drop any de-selected ids.
+function syncSelectionCache() {
+  shipments.forEach(r => {
+    if (selectedIds.has(r.id))
+      selectedData[r.id] = {
+        weight:    Number(r.weight    || 0),
+        total_aud: Number(r.total_aud || 0),
+        paid:      !!r.paid,
+      };
+  });
+  Object.keys(selectedData).forEach(id => {
+    if (!selectedIds.has(Number(id))) delete selectedData[id];
+  });
 }
 const selectedIds = new Set(_loadSelection());
 
@@ -407,6 +431,7 @@ function renderTable() {
 // ============================================================
 
 function updateSelectionUI() {
+  syncSelectionCache();
   persistSelection();
   const n = selectedIds.size;
 
@@ -451,7 +476,9 @@ function updateSelectionTotals() {
   if (!bar) return;
   const n = selectedIds.size;
   if (n === 0) { bar.classList.add("hidden"); return; }
-  const sel = shipments.filter(r => selectedIds.has(r.id));
+  // Total across ALL pages using the cached per-row figures, not just the
+  // rows currently rendered on the visible page.
+  const sel = Object.values(selectedData);
   const weight  = sel.reduce((a, r) => a + Number(r.weight   || 0), 0);
   const freight = sel.reduce((a, r) => a + Number(r.total_aud || 0), 0);
   const paid    = sel.filter(r => r.paid).reduce((a, r) => a + Number(r.total_aud || 0), 0);
