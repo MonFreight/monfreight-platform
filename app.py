@@ -643,6 +643,7 @@ def bulk_create_shipments(payload: BulkCreateIn, request: Request):
                 batch_date=payload.batch_date,
                 box_number=box,
                 mf_number=mf_for(payload.batch_date, box),
+                price_aud=18.00,
             )
             s.add(ship)
             created.append(ship)
