@@ -354,7 +354,7 @@ function renderTable() {
           <div class="muted small">${escapeHtml(r.receiver_city || "")}${r.receiver_city && r.receiver_phone ? " · " : ""}${escapeHtml(r.receiver_phone || "")}</div></td>
       <td>${escapeHtml(r.description || "")}</td>
       <td class="num">${fmt2(r.declared_value)}</td>
-      <td class="num">${fmt2(r.weight)}</td>
+      <td class="num"><span class="ed" data-field="weight" data-type="number">${fmt2(r.weight)}</span></td>
       <td class="num">
         <span class="ed" data-field="price" data-type="formula">${fmt2(r.price_aud)}</span>
         ${r.price_formula ? `<span class="formula" title="${escapeAttr(r.price_formula)}">${escapeHtml(r.price_formula)}</span>` : ""}
@@ -952,6 +952,7 @@ function startInlineEdit(ed) {
   if (field === "price")      val = ship.price_formula || ship.price_aud;
   else if (field === "batch_date") val = ship.batch_date;
   else if (field === "extra") val = ship.extra_charges;
+  else if (field === "weight") val = ship.weight;
   ed.innerHTML = `<input ${type === "date" ? 'type="text"' : ""} value="${escapeAttr(val)}">`;
   const inp = ed.querySelector("input");
   if (field === "batch_date" && window.flatpickr) {
@@ -969,6 +970,7 @@ function startInlineEdit(ed) {
     if (field === "batch_date") body.batch_date = newVal;
     else if (field === "price") body.price_formula = String(newVal);
     else if (field === "extra") body.extra_charges = parseFloat(newVal) || 0;
+    else if (field === "weight") body.weight = parseFloat(newVal) || 0;
     const r = await patchShipment(id, body);
     if (r) { Object.assign(ship, r); renderTable(); toast("Saved."); }
     else   { ed.textContent = old; ed.classList.remove("editing"); }

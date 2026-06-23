@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Outer Package Labels</title>
-<link rel="stylesheet" href="/static/prep_print.css?v=6">
+<link rel="stylesheet" href="/static/prep_print.css?v=7">
 <style>
   /* Outer labels print on A4 landscape, 4 labels per page (2 × 2). */
   @page { size: A4 landscape; margin: 9mm; }
@@ -72,11 +72,6 @@
 
     <!-- Shipment info -->
     <div class="ol-col-info">
-      <div class="ol-field">
-        <span class="ol-fi">{{ field_icon('parcels') }}</span>
-        <span class="ol-ft"><span class="ol-fl">PARCELS IN PACKAGE:</span>
-          <span class="ol-fv">{{ p.parcel_count_manual if p.parcel_count_manual is not none else p.parcel_count }}{% if p.box_numbers %} (Boxes {{ p.box_numbers|join(", ") }}){% endif %}</span></span>
-      </div>
       <div class="ol-field">
         <span class="ol-fi">{{ field_icon('weight') }}</span>
         <span class="ol-ft"><span class="ol-fl">GROSS WEIGHT:</span>
