@@ -55,11 +55,36 @@ function _buildLgMap(rows) {
 let sortKey = "batch_date";
 let sortDir = "desc";
 
-// Selections persist across page navigation (server-side pagination reloads
-// the page) and the browser tab session via sessionStorage, so users can pick
-// shipments from multiple pages without losing earlier selections.
+// Selections persist across page navigation WITHIN the same Batch Date / filter
+// context (server-side pagination reloads the page), via sessionStorage, so
+// users can pick shipments from multiple pages without losing earlier ones.
+// They are cleared automatically when the working context changes — a different
+// Batch Date, date range, or search — so a previous batch's picks never linger.
 const SELECTION_KEY = "mf_selected_ids";
 const SELECTION_DATA_KEY = "mf_selected_data";
+const SELECTION_CTX_KEY  = "mf_selected_ctx";
+
+// Identifies the current working context. Changing the Batch Date, date range,
+// or search query produces a different key, which invalidates the selection.
+function _currentSelectionContext() {
+  return JSON.stringify({
+    start: window.FILTER_START || "",
+    end:   window.FILTER_END   || "",
+    q:     window.SEARCH_Q     || "",
+  });
+}
+// If the stored context no longer matches the page we just loaded, wipe any
+// carried-over selection so it can't bleed across batch dates / filters.
+(function _reconcileSelectionContext() {
+  try {
+    if (sessionStorage.getItem(SELECTION_CTX_KEY) !== _currentSelectionContext()) {
+      sessionStorage.removeItem(SELECTION_KEY);
+      sessionStorage.removeItem(SELECTION_DATA_KEY);
+      sessionStorage.setItem(SELECTION_CTX_KEY, _currentSelectionContext());
+    }
+  } catch (_) { /* ignore privacy-mode errors */ }
+})();
+
 function _loadSelection() {
   try {
     const raw = sessionStorage.getItem(SELECTION_KEY);
@@ -79,7 +104,23 @@ function persistSelection() {
   try {
     sessionStorage.setItem(SELECTION_KEY, JSON.stringify(Array.from(selectedIds)));
     sessionStorage.setItem(SELECTION_DATA_KEY, JSON.stringify(selectedData));
+    sessionStorage.setItem(SELECTION_CTX_KEY, _currentSelectionContext());
   } catch (_) { /* ignore quota / privacy-mode errors */ }
+}
+// Clear the whole selection (used after an action completes).
+function clearSelection() {
+  selectedIds.clear();
+  Object.keys(selectedData).forEach(id => delete selectedData[id]);
+  persistSelection();
+  if (typeof renderTable === "function") renderTable();
+}
+// Every selected id, ordered: current-page rows first (by sort order), then any
+// off-page selections by id. Used so batch actions cover ALL selected pages.
+function allSelectedIdsOrdered() {
+  const onPage = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const seen = new Set(onPage);
+  const offPage = Array.from(selectedIds).filter(id => !seen.has(id)).sort((a, b) => a - b);
+  return [...onPage, ...offPage];
 }
 // Refresh the cache from the current page's rows and drop any de-selected ids.
 function syncSelectionCache() {
@@ -518,19 +559,21 @@ document.addEventListener("change", e => {
 // Print selected (from shipments panel)
 $("#printSelectedBtn")?.addEventListener("click", async () => {
   if (selectedIds.size === 0) return;
-  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const orderedIds = allSelectedIdsOrdered();
   const n = orderedIds.length;
   const choice = await chooseLabelTemplate(`${n} selected label${n === 1 ? "" : "s"}`);
   if (!choice) return;
   if (choice === "html") window.open(`/labels/by-ids?ids=${orderedIds.join(",")}`, "_blank");
   else printXlsxInBrowser(`/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`);
+  clearSelection();   // action completed → reset selection
 });
 
 // Excel selected (from shipments panel)
 $("#excelSelectedBtn")?.addEventListener("click", () => {
   if (selectedIds.size === 0) return;
-  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const orderedIds = allSelectedIdsOrdered();
   window.location = `/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`;
+  clearSelection();   // action completed → reset selection
 });
 
 // Delete selected (from shipments panel)
@@ -752,18 +795,20 @@ $("#linkAfterCreateConfirm")?.addEventListener("click", async () => {
 // Labels panel buttons (mirror to shipments-panel actions)
 $("#labelPrintSelectedBtn")?.addEventListener("click", async () => {
   if (selectedIds.size === 0) { toast("No shipments selected — go to Shipments and select some first.", "err"); return; }
-  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const orderedIds = allSelectedIdsOrdered();
   const n = orderedIds.length;
   const choice = await chooseLabelTemplate(`${n} selected label${n === 1 ? "" : "s"}`);
   if (!choice) return;
   if (choice === "html") window.open(`/labels/by-ids?ids=${orderedIds.join(",")}`, "_blank");
   else printXlsxInBrowser(`/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`);
+  clearSelection();   // action completed → reset selection
 });
 
 $("#labelExcelSelectedBtn")?.addEventListener("click", () => {
   if (selectedIds.size === 0) { toast("No shipments selected.", "err"); return; }
-  const orderedIds = sortRows(shipments.filter(r => selectedIds.has(r.id))).map(r => r.id);
+  const orderedIds = allSelectedIdsOrdered();
   window.location = `/labels/by-ids.xlsx?ids=${orderedIds.join(",")}`;
+  clearSelection();   // action completed → reset selection
 });
 
 // ============================================================
