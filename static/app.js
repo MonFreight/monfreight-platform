@@ -1226,6 +1226,7 @@ function openEdit(ship) {
   editForm.elements["price_input"].value  = ship.price_formula || ship.price_aud || "";
   editForm.elements["extra_charges"].value = ship.extra_charges || 0;
   editForm.elements["total_display"].value = (ship.total_aud || 0).toFixed(2);
+  resetMntToggle();
   updateEditPricePreview();
   renderEditLinkSection();
   editModal.classList.remove("hidden");
@@ -1258,11 +1259,64 @@ function updateEditPricePreview() {
   const ext = +editForm.elements["extra_charges"].value || 0;
   const total = (w * (r || 0)) + ext;
   editForm.elements["total_display"].value = total.toFixed(2);
+  updateMntTotal();
 }
 
 ["price_input","weight","declared_value","extra_charges"].forEach(n => {
   editForm.elements[n]?.addEventListener("input", updateEditPricePreview);
 });
+
+// ── MNT (Mongolian Tugrug) conversion — display only ──────────────────────
+// When the MNT box is ticked we show Total(₮) = Total(AU$) × rate. The rate
+// defaults to the live Golomt sell rate from gogo.mn (/api/fx/aud-mnt) but is
+// editable so staff can override it for a specific customer/day. Nothing here
+// is saved to the shipment — it's purely a convenience conversion.
+const mntToggle = $("#editMntToggle");
+const mntBlock  = $("#editMntBlock");
+const mntRate   = $("#editMntRate");
+const mntTotal  = $("#editMntTotal");
+const mntInfo   = $("#editMntInfo");
+let mntRateLoaded = false;
+
+function resetMntToggle() {
+  if (!mntToggle) return;
+  mntToggle.checked = false;
+  mntBlock.classList.add("hidden");
+}
+
+function updateMntTotal() {
+  if (!mntToggle || !mntToggle.checked) return;
+  const aud  = parseFloat(editForm.elements["total_display"].value) || 0;
+  const rate = parseFloat(mntRate.value) || 0;
+  mntTotal.value = "₮ " + Math.round(aud * rate).toLocaleString("en-US");
+}
+
+async function loadMntRate() {
+  try {
+    const res = await fetch("/api/fx/aud-mnt");
+    const d = await res.json();
+    mntRate.value = Number(d.rate).toFixed(2);
+    const when = d.fetched_at ? new Date(d.fetched_at).toLocaleString() : "—";
+    const src = d.source === "live"  ? `live from gogo.mn (Golomt sell), updated ${when}`
+              : d.source === "cache" ? `cached gogo.mn rate, updated ${when}`
+              : "default fallback rate — gogo.mn unavailable";
+    mntInfo.textContent = `Rate source: ${src}. You can edit the rate to override.`;
+    mntRateLoaded = true;
+  } catch {
+    mntInfo.textContent = "Couldn't load the live rate — enter a rate manually.";
+  }
+}
+
+mntToggle?.addEventListener("change", async () => {
+  if (mntToggle.checked) {
+    mntBlock.classList.remove("hidden");
+    if (!mntRateLoaded || !mntRate.value) await loadMntRate();
+    updateMntTotal();
+  } else {
+    mntBlock.classList.add("hidden");
+  }
+});
+mntRate?.addEventListener("input", updateMntTotal);
 
 editForm.addEventListener("submit", async e => {
   e.preventDefault();

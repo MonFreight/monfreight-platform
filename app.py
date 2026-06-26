@@ -25,6 +25,7 @@ from sqlalchemy import (Boolean, Column, Date, DateTime, Float, Integer,
                         String, create_engine, select, text)
 from sqlalchemy.orm import DeclarativeBase, Session
 
+import fx
 from label_excel import (build_aircargo_xlsx, build_labels_xlsx,
                          _format_receiver_address, _strip_quantities,
                          PAGE_HEIGHT as LABEL_PAGE_HEIGHT)
@@ -97,6 +98,14 @@ class Shipment(Base):
     package_id = Column(Integer, nullable=True, index=True)
 
     created_at = Column(DateTime, default=dt.datetime.now)
+
+
+class Setting(Base):
+    """Simple key/value store for app-wide settings (e.g. cached FX rate)."""
+    __tablename__ = "app_settings"
+    key = Column(String, primary_key=True)
+    value = Column(String, default="")
+    updated_at = Column(DateTime, default=dt.datetime.now, onupdate=dt.datetime.now)
 
 
 Base.metadata.create_all(engine)
@@ -455,6 +464,81 @@ def health():
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# --------------------------------------------------------------------------
+# settings store + AUD->MNT exchange rate
+# --------------------------------------------------------------------------
+def _setting_get(s: Session, key: str, default: Optional[str] = None) -> Optional[str]:
+    row = s.get(Setting, key)
+    return row.value if row else default
+
+
+def _setting_set(s: Session, key: str, value: str) -> None:
+    row = s.get(Setting, key)
+    if row:
+        row.value = value
+        row.updated_at = dt.datetime.now()
+    else:
+        s.add(Setting(key=key, value=value))
+    s.commit()
+
+
+# Re-fetch the live rate only if the cached one is older than this.
+FX_REFRESH_AFTER = dt.timedelta(hours=12)
+_FX_RATE_KEY = "fx_aud_mnt_rate"
+_FX_TIME_KEY = "fx_aud_mnt_fetched_at"
+
+
+def get_aud_mnt_rate(force: bool = False) -> dict:
+    """Current AUD->MNT rate (Golomt sell, from gogo.mn), refreshed on demand.
+
+    Never raises: a failed live fetch falls back to the last cached value, and
+    if there has never been one, to fx.FALLBACK_RATE. The conversion in the UI
+    therefore always has a number to work with.
+    """
+    now = dt.datetime.now()
+    with Session(engine) as s:
+        cached = _setting_get(s, _FX_RATE_KEY)
+        fetched_raw = _setting_get(s, _FX_TIME_KEY)
+        fetched_at = None
+        if fetched_raw:
+            try:
+                fetched_at = dt.datetime.fromisoformat(fetched_raw)
+            except ValueError:
+                fetched_at = None
+
+        source = "cache"
+        stale = fetched_at is None or (now - fetched_at) > FX_REFRESH_AFTER
+        if force or cached is None or stale:
+            try:
+                live = fx.fetch_live_rate()
+                if live:
+                    _setting_set(s, _FX_RATE_KEY, f"{live:.2f}")
+                    _setting_set(s, _FX_TIME_KEY, now.isoformat())
+                    cached, fetched_at, source = f"{live:.2f}", now, "live"
+                else:
+                    print("[fx] gogo.mn returned no parseable rate; keeping cache")
+            except Exception as e:  # network/parse failure must not break page
+                print(f"[fx] live fetch failed: {e}")
+
+        if cached is None:
+            cached, source = f"{fx.FALLBACK_RATE:.2f}", "fallback"
+
+        return {
+            "rate": float(cached),
+            "source": source,
+            "fetched_at": fetched_at.isoformat() if fetched_at else None,
+            "bank": "Golomt",
+            "side": "sell",
+            "pair": "AUD/MNT",
+        }
+
+
+@app.get("/api/fx/aud-mnt")
+def api_fx_aud_mnt(force: bool = False):
+    """Return the current AUD->MNT rate for the UI's Tugrug conversion."""
+    return get_aud_mnt_rate(force=force)
 
 
 PAGE_SIZE = 15
