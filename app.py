@@ -508,9 +508,19 @@ def get_aud_mnt_rate(force: bool = False) -> dict:
             except ValueError:
                 fetched_at = None
 
+        # Reject a cached value that's outside the plausible AUD band (e.g. a
+        # stale USD figure from an earlier parser bug) — force a fresh fetch so
+        # the cache self-heals instead of serving a wrong currency for 12h.
+        cached_ok = False
+        if cached is not None:
+            try:
+                cached_ok = fx.PLAUSIBLE_MIN <= float(cached) <= fx.PLAUSIBLE_MAX
+            except ValueError:
+                cached_ok = False
+
         source = "cache"
         stale = fetched_at is None or (now - fetched_at) > FX_REFRESH_AFTER
-        if force or cached is None or stale:
+        if force or cached is None or not cached_ok or stale:
             try:
                 live = fx.fetch_live_rate()
                 if live:
@@ -522,8 +532,17 @@ def get_aud_mnt_rate(force: bool = False) -> dict:
             except Exception as e:  # network/parse failure must not break page
                 print(f"[fx] live fetch failed: {e}")
 
-        if cached is None:
-            cached, source = f"{fx.FALLBACK_RATE:.2f}", "fallback"
+        # If we still have no usable, in-band value (e.g. fetch failed and the
+        # only cached value was a bad USD figure), use the safe fallback rather
+        # than serve the wrong currency.
+        usable = False
+        if cached is not None:
+            try:
+                usable = fx.PLAUSIBLE_MIN <= float(cached) <= fx.PLAUSIBLE_MAX
+            except ValueError:
+                usable = False
+        if not usable:
+            cached, source, fetched_at = f"{fx.FALLBACK_RATE:.2f}", "fallback", None
 
         return {
             "rate": float(cached),

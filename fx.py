@@ -22,25 +22,37 @@ GOGO_URL = "https://gogo.mn/exchange"
 # still show a number on a brand-new install.
 FALLBACK_RATE = 2552.48
 
-# Sanity band for an AUD->MNT rate. Anything outside this is treated as a
-# parse error and ignored, so a layout change on gogo.mn can't feed a junk
-# number into the conversion.
-PLAUSIBLE_MIN = 1500.0
-PLAUSIBLE_MAX = 4000.0
+# Sanity band for the AUD->MNT sell rate. Deliberately *excludes* the USD
+# rate (~3,500-3,600 MNT) so a mis-parse can never return a US-dollar figure
+# as if it were Australian dollars. AUD/MNT has sat around 2,400-2,700.
+PLAUSIBLE_MIN = 1800.0
+PLAUSIBLE_MAX = 3300.0
 
 # A money figure like "2,552.48" or "2552" or "2,418.00". Deliberately does
 # NOT match the small delta numbers gogo shows (e.g. "2.42") because those
 # have fewer than 3 leading digits and no thousands separator.
 _NUM_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{3,}(?:\.\d+)?")
 
+# Names/keywords for *other* currencies. Used to mark where the Australian
+# dollar section ends, so we never read a neighbouring currency's numbers
+# (most importantly the USD panel that can render right after the AUD tab).
+_OTHER_CCY_RE = re.compile(
+    r"Америк|Япон|Хятад|Хонконг|Хонгконг|Орос|Канад|Швейцар|Сингапур|Солонгос|"
+    r"Английн|Евро|иен|юань|фунт|рубль|франк|вон|USD|EUR|JPY|CNY|GBP|RUB|"
+    r"KRW|SGD|HKD|CAD|CHF",
+    re.I,
+)
 
-def parse_golomt_aud_sell(html_text: str) -> float | None:
+
+def parse_golomt_aud_sell(html_text: str) -> "float | None":
     """Extract the Golomt AUD sell rate from the gogo.mn exchange HTML.
 
-    Strategy: strip tags to plain text, then for each "Австралийн доллар"
-    block look for the "Голомт" row that follows and read its rate figures.
-    On that row the first money figure is Авах (buy) and the second is
-    Зарах (sell). Returns the sell rate, or None if nothing plausible found.
+    gogo.mn lists "Австралийн доллар" both as a section heading AND as a tab
+    label, and the default-shown tab panel (USD) can sit right after that
+    label. To avoid grabbing the USD rate, we only read a "Голомт" row that
+    falls inside the Australian-dollar section — i.e. between the AUD heading
+    and the next currency's name. The first money figure on the Golomt row is
+    Авах (buy), the second is Зарах (sell).
     """
     if not html_text:
         return None
@@ -49,15 +61,19 @@ def parse_golomt_aud_sell(html_text: str) -> float | None:
     # Drop the "last updated" dates (e.g. 2026/06/26) so the year can't be
     # mistaken for a rate figure.
     text = re.sub(r"\d{4}\s*[/.\-]\s*\d{1,2}\s*[/.\-]\s*\d{1,2}", " ", text)
-    text = re.sub(r"[\s ]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
 
-    candidates: list[float] = []
+    candidates = []
     for m in re.finditer(r"Австралийн доллар", text):
-        segment = text[m.start():m.start() + 1500]
-        g = re.search(r"Голомт", segment)
-        if not g:
+        # Bound the section: stop at the next *other* currency reference so a
+        # USD/other panel after a tab label can't bleed in.
+        nxt = _OTHER_CCY_RE.search(text, m.end())
+        end = nxt.start() if nxt else m.end() + 400
+        segment = text[m.end():end]
+        g = segment.find("Голомт")
+        if g == -1:
             continue
-        after = segment[g.start():g.start() + 220]
+        after = segment[g:g + 220]
         vals = [float(n.replace(",", "")) for n in _NUM_RE.findall(after)]
         big = [v for v in vals if v >= 500]  # drop delta figures like 2.42
         if len(big) >= 2:
@@ -71,11 +87,11 @@ def parse_golomt_aud_sell(html_text: str) -> float | None:
     return None
 
 
-def fetch_live_rate(timeout: int = 12) -> float | None:
+def fetch_live_rate(timeout: int = 12) -> "float | None":
     """Fetch gogo.mn and return the Golomt AUD sell rate, or None on failure.
 
-    Raises nothing for HTTP/parse problems is NOT guaranteed — callers should
-    wrap this in try/except so a network error can't bubble into a request.
+    Callers should wrap this in try/except so a network error can't bubble
+    into a request.
     """
     resp = requests.get(
         GOGO_URL,
