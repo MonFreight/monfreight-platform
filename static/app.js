@@ -313,6 +313,25 @@ function chooseLabelTemplate(scopeText = "this label") {
 const fmt0  = n => Number(n || 0).toLocaleString("en-AU", { maximumFractionDigits: 0 });
 const fmt2  = n => Number(n || 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtMoney = n => "$" + fmt2(n);
+const fmtMnt   = n => "₮ " + Math.round(Number(n || 0)).toLocaleString("en-US");
+
+// Cached AUD→MNT rate for the selection summary. Fetched once (reusing the
+// same /api/fx/aud-mnt endpoint as the shipment modal); if it can't load we
+// simply omit the ₮ figure rather than block or break the summary bar.
+let fxAudMnt = null;
+let fxFetchTried = false;
+async function ensureFxRate() {
+  if (fxFetchTried) return fxAudMnt;
+  fxFetchTried = true;
+  try {
+    const res = await fetch("/api/fx/aud-mnt");
+    const d = await res.json();
+    const r = Number(d.rate);
+    if (r > 0) { fxAudMnt = r; updateSelectionTotals(); }
+  } catch { /* leave fxAudMnt null — AUD-only display */ }
+  return fxAudMnt;
+}
+ensureFxRate();
 
 // ============================================================
 // STATS BAR
@@ -527,7 +546,7 @@ function updateSelectionTotals() {
   bar.innerHTML =
     `<strong>${n} row${n === 1 ? "" : "s"} selected</strong>` +
     ` &nbsp;·&nbsp; Weight: <strong>${fmt2(weight)} kg</strong>` +
-    ` &nbsp;·&nbsp; Freight: <strong>${fmtMoney(freight)}</strong>` +
+    ` &nbsp;·&nbsp; Freight: <strong>${fmtMoney(freight)}${fxAudMnt ? ` <span class="muted">(${fmtMnt(freight * fxAudMnt)})</span>` : ""}</strong>` +
     ` &nbsp;·&nbsp; Paid: <strong>${fmtMoney(paid)}</strong>` +
     ` &nbsp;·&nbsp; Outstanding: <strong>${fmtMoney(freight - paid)}</strong>` +
     ` <button class="btn ghost small" style="margin-left:auto" onclick="selectedIds.clear();renderTable();">✕ Clear</button>`;
