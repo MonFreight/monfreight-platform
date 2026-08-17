@@ -24,7 +24,16 @@ ADMIN_PASSWORD        default admin password        (default: random, logged onc
 ADMIN_PHONE           default admin mobile, E.164 e.g. +61400000000
 TWILIO_ACCOUNT_SID    Twilio credentials — if missing, runs in DEV MODE:
 TWILIO_AUTH_TOKEN     the code is shown on the login page instead of sent
-TWILIO_FROM           by SMS (configure Twilio before real go-live!)
+TWILIO_SMS_FROM       by SMS (configure Twilio before real go-live!).
+  (or TWILIO_FROM)    Sender number in E.164. Either name is accepted;
+                      TWILIO_FROM wins if both are set. Shared with sms.py.
+REQUIRE_SMS           set to 1/true/yes/on in production. Makes SMS
+                      verification FAIL CLOSED: if Twilio is not configured,
+                      or the account has no registered mobile, the login is
+                      refused with a clear error instead of falling back to
+                      DEV MODE and printing the code on the login page.
+                      Without this flag a user with a blank phone field
+                      silently bypasses 2FA even when Twilio works.
 OTP_TTL_SECONDS       code lifetime (default 300 = 5 minutes)
 SMS_TRUST_HOURS       how long an SMS verification is trusted before it is
                       required again (default 24)
@@ -68,7 +77,15 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+def _envflag(name: str, default: str = "") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 SESSION_HOURS = int(os.environ.get("SESSION_HOURS", "12"))
+# Production switch: never fall back to showing the OTP on screen. See the
+# module docstring — without this, an account with no registered mobile is
+# effectively single-factor.
+REQUIRE_SMS = _envflag("REQUIRE_SMS")
 OTP_TTL = int(os.environ.get("OTP_TTL_SECONDS", "300"))          # 5 minutes
 OTP_MAX_ATTEMPTS = 5            # wrong-code guesses per code
 OTP_RESEND_COOLDOWN = 60        # seconds between sends
@@ -216,15 +233,29 @@ def _record_send(user_id: int, ip: str) -> None:
 # --------------------------------------------------------------------------
 # SMS (Twilio REST API; dev mode when credentials are missing)
 # --------------------------------------------------------------------------
+def _twilio_from() -> str:
+    """Login-OTP sender number.
+
+    Accepts either name. sms.py (parcel notifications) has always read
+    TWILIO_SMS_FROM with a TWILIO_FROM fallback; auth.py used to require
+    TWILIO_FROM only, so deployments that set just TWILIO_SMS_FROM sent
+    parcel SMS fine while login silently stayed in DEV MODE and printed
+    the code on the page. Both names work here now.
+    """
+    return (os.environ.get("TWILIO_FROM")
+            or os.environ.get("TWILIO_SMS_FROM") or "").strip()
+
+
 def twilio_configured() -> bool:
-    return all(os.environ.get(k) for k in
-               ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM"))
+    return bool(os.environ.get("TWILIO_ACCOUNT_SID")
+                and os.environ.get("TWILIO_AUTH_TOKEN")
+                and _twilio_from())
 
 
 def send_sms(to: str, body: str) -> None:
     sid = os.environ["TWILIO_ACCOUNT_SID"]
     token = os.environ["TWILIO_AUTH_TOKEN"]
-    sender = os.environ["TWILIO_FROM"]
+    sender = _twilio_from()
     resp = _requests.post(
         f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
         auth=(sid, token),
@@ -353,6 +384,26 @@ def _issue_code(s: Session, user: User, ip: str,
     if err:
         raise HTTPException(429, err)
 
+    # Fail closed before issuing anything. These checks run first so that a
+    # refused login never leaves a live, unused code sitting in login_codes
+    # and never burns the caller's rate-limit budget.
+    if REQUIRE_SMS:
+        if not phone:
+            log.error("REQUIRE_SMS: account '%s' has no registered mobile — "
+                      "login refused (add one via user admin)", user.username)
+            _log(user.username, "login_refused", "No registered mobile", ip)
+            raise HTTPException(
+                403, "No mobile number is registered for this account. "
+                     "Please contact your administrator.")
+        if not twilio_configured():
+            log.error("REQUIRE_SMS: Twilio env vars missing — login refused "
+                      "for '%s'. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN "
+                      "and TWILIO_SMS_FROM (or TWILIO_FROM).", user.username)
+            _log(user.username, "login_refused", "SMS provider unavailable", ip)
+            raise HTTPException(
+                503, "SMS verification is temporarily unavailable. "
+                     "Please contact your administrator.")
+
     code = f"{secrets.randbelow(1_000_000):06d}"
     now = dt.datetime.utcnow()
     # invalidate previous unused codes
@@ -374,11 +425,17 @@ def _issue_code(s: Session, user: User, ip: str,
                  user.username, _mask_phone(phone))
     else:
         # DEV MODE — no SMS provider configured (or user has no phone).
-        # Show the code so the operator is never locked out. Configure
-        # Twilio env vars before real go-live.
+        # Show the code so the operator is never locked out. Unreachable
+        # when REQUIRE_SMS is set (guarded above); configure Twilio and set
+        # REQUIRE_SMS=1 before real go-live.
         dev_code = code
         log.warning("AUTH DEV MODE — verification code for '%s': %s",
                     user.username, code)
+
+    # Belt and braces: the guard above already makes this unreachable, but
+    # never let a code reach the client when the production flag is on.
+    if REQUIRE_SMS:
+        dev_code = None
 
     return {
         "ok": True,
