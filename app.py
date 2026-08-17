@@ -48,12 +48,23 @@ if _tpl_seed.exists() and not _tpl_dest.exists():
 
 DB_PATH = os.environ.get("DB_PATH", str(DATA_DIR / "monfreight.db"))
 DB_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DB_PATH}")
-if DB_URL.startswith("postgres://"):
-    DB_URL = DB_URL.replace("postgres://", "postgresql+psycopg://", 1)
+# Normalise Postgres URLs onto psycopg (v3) — the only Postgres driver in
+# requirements.txt. Railway and Heroku hand out either "postgres://" or
+# "postgresql://"; a bare "postgresql://" makes SQLAlchemy reach for psycopg2,
+# which is NOT installed, and the app dies at import with ModuleNotFoundError.
+# "postgresql+psycopg://" is left alone (it does not match either prefix).
+for _pg_prefix in ("postgres://", "postgresql://"):
+    if DB_URL.startswith(_pg_prefix):
+        DB_URL = "postgresql+psycopg://" + DB_URL[len(_pg_prefix):]
+        break
 
+_is_sqlite = DB_URL.startswith("sqlite")
 engine = create_engine(
     DB_URL,
-    connect_args={"check_same_thread": False} if DB_URL.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False} if _is_sqlite else {},
+    # Railway recycles idle Postgres connections; without pre-ping the first
+    # request after a quiet spell fails with a stale-connection error.
+    **({} if _is_sqlite else {"pool_pre_ping": True, "pool_recycle": 300}),
 )
 
 
