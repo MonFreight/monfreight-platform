@@ -12,6 +12,7 @@ from copy import copy
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -55,6 +56,24 @@ FIELDS = {
 }
 
 
+def _xl(value):
+    """Make a value safe to write into an .xlsx cell.
+
+    Excel's SpreadsheetML forbids most ASCII control characters
+    (\\x00-\\x08, \\x0b, \\x0c, \\x0e-\\x1f). openpyxl refuses to write them
+    and raises IllegalCharacterError, which aborts the whole workbook
+    build — one dirty character in one shipment kills the entire batch
+    export. Operator-entered address/name/note fields occasionally pick
+    these up from copy-paste or a bad encoding round-trip, so strip them
+    at the point of writing rather than trusting the data.
+
+    Non-string values (ints, floats, dates, None) pass through untouched.
+    """
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value).strip()
+    return value
+
+
 def _strip_quantities(desc: str) -> str:
     if not desc:
         return ""
@@ -89,7 +108,7 @@ def _set(ws, k: int, field: str, value) -> None:
     # only assigns when value is not None. To clear an existing cell we
     # must set the .value attribute directly. (This was the source of
     # stale-template-data showing up in every labels.xlsx export.)
-    ws.cell(row=row, column=col).value = value
+    ws.cell(row=row, column=col).value = _xl(value)
 
 
 # --------------------------------------------------------------------------
@@ -175,27 +194,27 @@ def build_aircargo_xlsx(rows: list[dict], batch_date: dt.date, out) -> None:
     rows = sorted(rows, key=lambda r: r["box_number"])
     for i, r in enumerate(rows):
         excel_row = 6 + i
-        ws.cell(row=excel_row, column=1, value=f"BOX {r['box_number']}")
-        ws.cell(row=excel_row, column=2, value=r["mf_number"])
-        ws.cell(row=excel_row, column=3, value=r.get("sender_name") or "")
-        ws.cell(row=excel_row, column=4, value=r.get("sender_phone") or "")
-        ws.cell(row=excel_row, column=5, value=r.get("sender_address") or "")
-        ws.cell(row=excel_row, column=6, value=r.get("sender_city") or "")
-        ws.cell(row=excel_row, column=7, value=r.get("sender_country") or "")
-        ws.cell(row=excel_row, column=8, value=r.get("sender_postal") or "")
-        ws.cell(row=excel_row, column=9, value=r.get("receiver_name") or "")
-        ws.cell(row=excel_row, column=10, value=r.get("receiver_phone") or "")
-        ws.cell(row=excel_row, column=11, value=r.get("receiver_address") or "")
-        ws.cell(row=excel_row, column=12, value=r.get("receiver_city") or "")
-        ws.cell(row=excel_row, column=13, value=r.get("receiver_country") or "")
-        ws.cell(row=excel_row, column=14, value=r.get("description") or "")
+        ws.cell(row=excel_row, column=1, value=_xl(f"BOX {r['box_number']}"))
+        ws.cell(row=excel_row, column=2, value=_xl(r["mf_number"]))
+        ws.cell(row=excel_row, column=3, value=_xl(r.get("sender_name") or ""))
+        ws.cell(row=excel_row, column=4, value=_xl(r.get("sender_phone") or ""))
+        ws.cell(row=excel_row, column=5, value=_xl(r.get("sender_address") or ""))
+        ws.cell(row=excel_row, column=6, value=_xl(r.get("sender_city") or ""))
+        ws.cell(row=excel_row, column=7, value=_xl(r.get("sender_country") or ""))
+        ws.cell(row=excel_row, column=8, value=_xl(r.get("sender_postal") or ""))
+        ws.cell(row=excel_row, column=9, value=_xl(r.get("receiver_name") or ""))
+        ws.cell(row=excel_row, column=10, value=_xl(r.get("receiver_phone") or ""))
+        ws.cell(row=excel_row, column=11, value=_xl(r.get("receiver_address") or ""))
+        ws.cell(row=excel_row, column=12, value=_xl(r.get("receiver_city") or ""))
+        ws.cell(row=excel_row, column=13, value=_xl(r.get("receiver_country") or ""))
+        ws.cell(row=excel_row, column=14, value=_xl(r.get("description") or ""))
         ws.cell(row=excel_row, column=15, value=r.get("declared_value") or 0)
         ws.cell(row=excel_row, column=16, value=r.get("weight") or 0)
         ws.cell(row=excel_row, column=17, value=r.get("price_aud") or 0)
         ws.cell(row=excel_row, column=18, value=r.get("extra_charges") or 0)
         ws.cell(row=excel_row, column=19, value=r.get("total_aud") or 0)
-        ws.cell(row=excel_row, column=20, value=r.get("delivery_note") or "")
-        ws.cell(row=excel_row, column=21, value=r.get("notes") or "")
+        ws.cell(row=excel_row, column=20, value=_xl(r.get("delivery_note") or ""))
+        ws.cell(row=excel_row, column=21, value=_xl(r.get("notes") or ""))
         is_paid = bool(r.get("paid"))
         lg = r.get("link_group")
         # Link group colour takes priority so all boxes in a group share
